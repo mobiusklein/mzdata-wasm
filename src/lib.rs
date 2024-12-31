@@ -1,25 +1,17 @@
-use std::io;
-
 use log;
-
-use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 use wasm_logger;
-use web_sys::{self, FileReader};
-use web_sys::{Event, HtmlInputElement};
-
-use mzdata::{io::MzMLReader, prelude::*};
-use mzpeaks::MassPeakSetType;
 
 mod binds;
-mod webio;
-mod worker_reader;
+mod utils;
 mod mem_reader;
+mod mem_writer;
+// mod webio;
+// mod worker_reader;
 // mod asyncio;
 
 pub use binds::*;
 pub use mem_reader::MemWebMZReader as WebMZReader;
-pub use worker_reader::WorkerWebMZReader as WorkerWebMZReader;
 
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the
@@ -39,6 +31,7 @@ fn start() {
     set_panic_hook();
 }
 
+/*
 #[wasm_bindgen]
 pub fn read_file(event: &Event) {
     event.prevent_default();
@@ -205,3 +198,4 @@ pub fn read_file(event: &Event) {
     }
 
 }
+ */

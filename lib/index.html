@@ -1,23 +1,13 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="utf-8">
-    <title>Hello wasm-pack!</title>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + TS</title>
   </head>
   <body>
-    <noscript>This page contains webassembly and javascript content, please enable javascript in your browser.</noscript>
-    <h1>Hello WASM</h1>
-    <input id="file-picker" type="file" name="file-picker" />
-    <script>
-      document.getElementById("file-picker").addEventListener("change", async (event) => {
-        console.log(event)
-        console.log(event.target.files[0])
-        const reader = await MZReader.open(event.target.files[0]);
-        console.log(reader);
-        this.test = reader;
-
-        //Project.read_file(event)
-      })
-    </script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

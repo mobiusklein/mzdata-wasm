@@ -1,14 +1,28 @@
-use js_sys::{Array, Object};
-use log;
+use js_sys::{Array, Float32Array, Float64Array, Int32Array, Object, Reflect, Uint8Array};
+use log::{self, info};
 
-use mzdata::{prelude::SpectrumLike, spectrum::{Activation, PeakDataLevel}};
+use mzdata::{
+    prelude::{ByteArrayView, IonMobilityFrameLike, IonProperties, SpectrumLike},
+    spectrum::{
+        bindata::ArrayRetrievalError, Activation, ArrayType, BinaryArrayMap, MultiLayerIonMobilityFrame, MultiLayerSpectrum, PeakDataLevel, RefPeakDataLevel, ScanEvent
+    },
+};
 use wasm_bindgen::prelude::*;
 
-use mzpeaks::{peak::MZPoint, prelude::*, CentroidPeak, DeconvolutedPeak, Tolerance};
+use mzpeaks::{
+    feature::{Feature, SimpleFeature},
+    peak::MZPoint,
+    prelude::*,
+    CentroidPeak, DeconvolutedPeak, IonMobility, Time, Tolerance, MZ,
+};
 
-use chemical_elements::{
-    isotopic_pattern::{isotopic_variants, Peak},
-    ChemicalComposition, PROTON,
+use mzsignal::feature_statistics::{FeatureTransform, FitPeaksOn, MultiPeakShapeFit};
+
+use mzdeisotope::{
+    deconvolute_peaks,
+    isotopic_model::{IsotopicModels, IsotopicPatternParams},
+    scorer::{MaximizingFitFilter, PenalizedMSDeconvScorer},
+    DeconvolvedSolutionPeak, IsotopicModelLike,
 };
 
 use mzdata::{
@@ -18,7 +32,49 @@ use mzdata::{
     },
 };
 
-#[wasm_bindgen(js_name="Tolerance")]
+pub fn array_map_to_js(arrays: &BinaryArrayMap) -> Result<Object, ArrayRetrievalError> {
+    let mut acc = Vec::new();
+    for (name, data) in arrays.iter() {
+        let name = if let ArrayType::NonStandardDataArray { name } = name {
+            name.to_string()
+        } else {
+            name.as_param_const().name.to_string()
+        };
+        match data.dtype() {
+            mzdata::spectrum::BinaryDataArrayType::Unknown
+            | mzdata::spectrum::BinaryDataArrayType::ASCII => {
+                let view = data.decode()?;
+                let buf = Uint8Array::new_with_length(view.len() as u32);
+                buf.copy_from(&view);
+                acc.push(Array::of2(&JsValue::from_str(&name), &JsValue::from(buf)))
+            }
+            mzdata::spectrum::BinaryDataArrayType::Float64 => {
+                let view = data.to_f64()?;
+                let buf = Float64Array::new_with_length(view.len() as u32);
+                buf.copy_from(&view);
+                acc.push(Array::of2(&JsValue::from_str(&name), &JsValue::from(buf)))
+            }
+            mzdata::spectrum::BinaryDataArrayType::Float32 => {
+                let view = data.to_f32()?;
+                let buf = Float32Array::new_with_length(view.len() as u32);
+                buf.copy_from(&view);
+                acc.push(Array::of2(&JsValue::from_str(&name), &JsValue::from(buf)))
+            }
+            mzdata::spectrum::BinaryDataArrayType::Int64 => todo!(),
+            mzdata::spectrum::BinaryDataArrayType::Int32 => {
+                let view = data.to_i32()?;
+                let buf = Int32Array::new_with_length(view.len() as u32);
+                buf.copy_from(&view);
+                acc.push(Array::of2(&JsValue::from_str(&name), &JsValue::from(buf)))
+            }
+        }
+    }
+
+    let res = Object::from_entries(&JsValue::from(acc)).expect("Failed to build array map");
+    Ok(res)
+}
+
+#[wasm_bindgen(js_name = "Tolerance")]
 #[derive(Debug, Clone, Copy)]
 pub struct WebTolerance(Tolerance);
 
@@ -34,8 +90,8 @@ impl WebTolerance {
     }
 }
 
-#[wasm_bindgen(inspectable, js_name="SimplePeak")]
-#[derive(Debug, Default, Clone, Copy)]
+#[wasm_bindgen(inspectable, js_name = "SimplePeak")]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SimpleWebPeak {
     pub mz: f64,
     pub intensity: f32,
@@ -43,10 +99,16 @@ pub struct SimpleWebPeak {
 
 impl From<MZPoint> for SimpleWebPeak {
     fn from(value: MZPoint) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&MZPoint> for SimpleWebPeak {
+    fn from(value: &MZPoint) -> Self {
         SimpleWebPeak {
             mz: value.mz,
             intensity: value.intensity,
-            .. Default::default()
+            ..Default::default()
         }
     }
 }
@@ -56,7 +118,7 @@ impl From<&CentroidPeak> for SimpleWebPeak {
         SimpleWebPeak {
             mz: value.mz,
             intensity: value.intensity as f32,
-            .. Default::default()
+            ..Default::default()
         }
     }
 }
@@ -65,26 +127,60 @@ impl From<&DeconvolutedPeak> for SimpleWebPeak {
         SimpleWebPeak {
             mz: value.mz(),
             intensity: value.intensity as f32,
-            .. Default::default()
+            ..Default::default()
         }
     }
 }
 
-impl From<Peak> for SimpleWebPeak {
-    fn from(value: Peak) -> Self {
+impl From<&DeconvolvedSolutionPeak> for SimpleWebPeak {
+    fn from(value: &DeconvolvedSolutionPeak) -> Self {
         SimpleWebPeak {
-            mz: value.mz,
+            mz: value.mz(),
             intensity: value.intensity as f32,
-            .. Default::default()
+            ..Default::default()
         }
     }
 }
 
-#[wasm_bindgen(js_name="Param")]
-#[derive(Debug, Default, Clone)]
+#[wasm_bindgen(inspectable, js_name = "SimpleChargedPeak")]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SimpleWebChargedPeak {
+    pub mz: f64,
+    pub intensity: f32,
+    pub charge: i32,
+    pub score: f32,
+    #[wasm_bindgen(getter_with_clone)]
+    pub envelope: Box<[SimpleWebPeak]>,
+}
+
+impl From<&DeconvolutedPeak> for SimpleWebChargedPeak {
+    fn from(value: &DeconvolutedPeak) -> Self {
+        SimpleWebChargedPeak {
+            mz: value.mz(),
+            intensity: value.intensity as f32,
+            charge: value.charge,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&DeconvolvedSolutionPeak> for SimpleWebChargedPeak {
+    fn from(value: &DeconvolvedSolutionPeak) -> Self {
+        SimpleWebChargedPeak {
+            mz: value.mz(),
+            intensity: value.intensity as f32,
+            charge: value.charge,
+            score: value.score,
+            envelope: value.envelope.iter().map(|p| p.into()).collect(),
+        }
+    }
+}
+
+#[wasm_bindgen(js_name = "Param")]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebParam(Param);
 
-#[wasm_bindgen(js_class="Param")]
+#[wasm_bindgen(js_class = "Param")]
 impl WebParam {
     #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
@@ -116,12 +212,18 @@ impl WebParam {
         }
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn unit(&self) -> String {
+        self.0.unit.to_string()
+    }
+
     #[wasm_bindgen(js_name = "toJSON")]
     pub fn to_json(&self) -> Result<Object, JsValue> {
-        let entries = Array::of3(
+        let entries = Array::of4(
             &Array::of2(&JsValue::from_str("name"), &self.name().into()),
             &Array::of2(&JsValue::from_str("value"), &self.value()),
             &Array::of2(&JsValue::from_str("id"), &self.id().into()),
+            &Array::of2(&JsValue::from_str("unit"), &self.unit().into()),
         );
         Object::from_entries(&entries)
     }
@@ -137,18 +239,18 @@ impl WebParam {
     }
 }
 
-#[wasm_bindgen(js_name="IsolationWindow")]
-#[derive(Debug, Default, Clone)]
+#[wasm_bindgen(js_name = "IsolationWindow")]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebIsolationWindow(IsolationWindow);
 
-#[wasm_bindgen(js_class="IsolationWindow")]
+#[wasm_bindgen(js_class = "IsolationWindow")]
 impl WebIsolationWindow {
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = "lowerBound")]
     pub fn lower_bound(&self) -> f32 {
         self.0.lower_bound
     }
 
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = "upperBound")]
     pub fn upper_bound(&self) -> f32 {
         self.0.upper_bound
     }
@@ -156,20 +258,28 @@ impl WebIsolationWindow {
     pub fn contains(&self, x: f32) -> bool {
         self.0.contains(x)
     }
+
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Object {
+        let inst = Object::new();
+        Reflect::set(&inst, &JsValue::from_str("lower_bound"), &JsValue::from_f64(self.0.lower_bound as f64)).unwrap();
+        Reflect::set(&inst, &JsValue::from_str("upper_bound"), &JsValue::from_f64(self.0.upper_bound as f64)).unwrap();
+        inst
+    }
 }
 
-#[wasm_bindgen(js_name="ScanWindow")]
-#[derive(Debug, Default, Clone)]
+#[wasm_bindgen(js_name = "ScanWindow")]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebScanWindow(ScanWindow);
 
-#[wasm_bindgen(js_class="ScanWindow")]
+#[wasm_bindgen(js_class = "ScanWindow")]
 impl WebScanWindow {
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = "lowerBound")]
     pub fn lower_bound(&self) -> f32 {
         self.0.lower_bound
     }
 
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = "upperBound")]
     pub fn upper_bound(&self) -> f32 {
         self.0.upper_bound
     }
@@ -177,13 +287,64 @@ impl WebScanWindow {
     pub fn contains(&self, x: f32) -> bool {
         self.0.contains(x)
     }
+
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Object {
+        let inst = Object::new();
+        Reflect::set(&inst, &JsValue::from_str("lower_bound"), &JsValue::from_f64(self.0.lower_bound as f64)).unwrap();
+        Reflect::set(&inst, &JsValue::from_str("upper_bound"), &JsValue::from_f64(self.0.upper_bound as f64)).unwrap();
+        inst
+    }
 }
 
-#[wasm_bindgen(js_name="SelectedIon")]
-#[derive(Debug, Clone)]
+#[wasm_bindgen(js_name = "ScanEvent")]
+pub struct WebScanEvent(ScanEvent);
+
+#[wasm_bindgen(js_class = "ScanEvent")]
+impl WebScanEvent {
+    #[wasm_bindgen(getter, js_name = "startTime")]
+    pub fn start_time(&self) -> f64 {
+        self.0.start_time
+    }
+
+    #[wasm_bindgen(getter, js_name = "injectionTime")]
+    pub fn injection_time(&self) -> f32 {
+        self.0.injection_time
+    }
+
+    #[wasm_bindgen(getter, js_name = "scanWindows")]
+    pub fn scan_windows(&self) -> Vec<WebScanWindow> {
+        self.0
+            .scan_windows
+            .iter()
+            .map(|w| WebScanWindow(w.clone()))
+            .collect()
+    }
+
+    #[wasm_bindgen(getter, js_name = "instrumentConfigurationID")]
+    pub fn instrument_configuration_id(&self) -> u32 {
+        self.0.instrument_configuration_id
+    }
+
+    #[wasm_bindgen(js_name = "filterString")]
+    pub fn filter_string(&self) -> Option<String> {
+        self.0.filter_string().map(|s| s.to_string())
+    }
+
+    pub fn params(&self) -> Vec<WebParam> {
+        self.0
+            .params()
+            .iter()
+            .map(|p| WebParam(p.clone()))
+            .collect()
+    }
+}
+
+#[wasm_bindgen(js_name = "SelectedIon")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebSelectedIon(SelectedIon);
 
-#[wasm_bindgen(js_class="SelectedIon")]
+#[wasm_bindgen(js_class = "SelectedIon")]
 impl WebSelectedIon {
     #[wasm_bindgen(getter)]
     pub fn mz(&self) -> f64 {
@@ -210,14 +371,12 @@ impl WebSelectedIon {
     }
 }
 
-
-#[wasm_bindgen(js_name="Activation")]
-#[derive(Debug, Clone)]
+#[wasm_bindgen(js_name = "Activation")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebActivation(Activation);
 
-#[wasm_bindgen(js_class="Activation")]
+#[wasm_bindgen(js_class = "Activation")]
 impl WebActivation {
-
     #[wasm_bindgen(getter)]
     pub fn method(&self) -> Option<String> {
         self.0.method().map(|m| m.name().to_string())
@@ -229,21 +388,18 @@ impl WebActivation {
     }
 
     pub fn methods(&self) -> Vec<WebParam> {
-        self.0.methods().iter().map(|m| {
-            WebParam(m.to_param().into())
-        }).collect()
-    }
-
-    pub fn params(&self) -> Vec<WebParam> {
         self.0
-            .params
+            .methods()
             .iter()
-            .cloned()
-            .map(|p| WebParam(p))
+            .map(|m| WebParam(m.to_param().into()))
             .collect()
     }
 
-    #[wasm_bindgen(js_name="toJSON")]
+    pub fn params(&self) -> Vec<WebParam> {
+        self.0.params.iter().cloned().map(|p| WebParam(p)).collect()
+    }
+
+    #[wasm_bindgen(js_name = "toJSON")]
     pub fn to_json(&self) -> Result<Object, JsValue> {
         let entries = Array::of3(
             &Array::of2(&JsValue::from_str("method"), &self.method().into()),
@@ -254,17 +410,17 @@ impl WebActivation {
     }
 }
 
-
-#[wasm_bindgen(getter_with_clone, inspectable, js_name="Precursor")]
-#[derive(Debug, Clone)]
+#[wasm_bindgen(getter_with_clone, inspectable, js_name = "Precursor")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebPrecursor {
     _inner: Precursor,
     pub ions: Vec<WebSelectedIon>,
+    #[wasm_bindgen(js_name = "isolationWindow")]
     pub isolation_window: WebIsolationWindow,
-    pub activation: WebActivation
+    pub activation: WebActivation,
 }
 
-#[wasm_bindgen(js_class="Precursor")]
+#[wasm_bindgen(js_class = "Precursor")]
 impl WebPrecursor {
     fn new(precursor: Precursor) -> Self {
         let ions = precursor
@@ -279,33 +435,51 @@ impl WebPrecursor {
             _inner: precursor,
             ions,
             isolation_window,
-            activation
+            activation,
         }
+    }
+
+    #[wasm_bindgen(getter, js_name="precursorScanID")]
+    pub fn precursor_id(&self) -> Option<String> {
+        self._inner.precursor_id.clone()
     }
 }
 
-#[wasm_bindgen]
-pub fn generate_isotopic_pattern(formula: &str) -> Result<Vec<SimpleWebPeak>, String> {
-    let comp: ChemicalComposition = match formula.parse() {
-        Ok(comp) => comp,
-        Err(e) => {
-            return Err(format!("Bad Formula {}", e));
-        }
-    };
-    log::info!("{}", comp.to_string());
-    Ok(isotopic_variants(comp, 0, 1, PROTON)
-        .into_iter()
-        .map(|p| p.into())
-        .collect())
-}
-
-#[wasm_bindgen(js_name="SignalContinuity")]
+#[wasm_bindgen(js_name = "SignalContinuity")]
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Hash, Eq)]
 pub enum WebSignalContinuity {
     #[default]
     Unknown,
     Centroid,
     Profile,
+}
+
+#[wasm_bindgen(js_name = "IsotopicModel")]
+#[derive(Debug, Clone, Copy)]
+pub struct WebIsotopicModel(IsotopicModels);
+
+#[wasm_bindgen(js_class = "IsotopicModel")]
+impl WebIsotopicModel {
+    pub fn peptide() -> Self {
+        Self(IsotopicModels::Peptide)
+    }
+
+    pub fn glycopeptide() -> Self {
+        Self(IsotopicModels::Glycopeptide)
+    }
+
+    pub fn glycan() -> Self {
+        Self(IsotopicModels::Glycan)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn name(&self) -> String {
+        format!("{:?}", self.0.clone())
+    }
+
+    pub fn copy(&self) -> Self {
+        *self
+    }
 }
 
 impl From<SignalContinuity> for WebSignalContinuity {
@@ -319,71 +493,128 @@ impl From<SignalContinuity> for WebSignalContinuity {
 }
 
 #[wasm_bindgen(js_name = "Spectrum")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebSpectrum {
-    peaks: PeakDataLevel,
-    description: SpectrumDescription,
-    precursor: Option<WebPrecursor>,
+    inner: MultiLayerSpectrum<CentroidPeak, DeconvolvedSolutionPeak>,
+}
+
+impl From<MultiLayerSpectrum<CentroidPeak, DeconvolvedSolutionPeak>> for WebSpectrum {
+    fn from(mut value: MultiLayerSpectrum<CentroidPeak, DeconvolvedSolutionPeak>) -> Self {
+        value.arrays.as_ref().inspect(|a| {
+            for (k, v) in a.iter() {
+                if let Some(n) = v.data_len().ok() {
+                    if n > 0 {
+                        info!("Converting {} with {} items", k, n);
+                    }
+                }
+            }
+        });
+        match value.try_build_peaks() {
+            Ok(x) => {
+                if x.len() > 0 {
+                    match x {
+                        RefPeakDataLevel::Missing => info!("Missing"),
+                        RefPeakDataLevel::RawData(_) => info!("RawData"),
+                        RefPeakDataLevel::Centroid(_) => info!("Centroid"),
+                        RefPeakDataLevel::Deconvoluted(_) => info!("Deconvoluted"),
+                    }
+                }
+            }
+            Err(e) => {
+                info!(
+                    "Failed to locate data arrays for spectrum {}: {e}",
+                    value.id()
+                )
+            }
+        }
+
+        Self { inner: value }
+    }
 }
 
 impl WebSpectrum {
+    pub fn as_ref(&self) -> &MultiLayerSpectrum<CentroidPeak, DeconvolvedSolutionPeak> {
+        &self.inner
+    }
+
     pub fn new(description: SpectrumDescription) -> Self {
-        let precursor = description.precursor.clone().map(|p| WebPrecursor::new(p));
         Self {
-            peaks: PeakDataLevel::Missing,
-            description,
-            precursor,
+            inner: MultiLayerSpectrum::from_peaks_data_levels_and_description(
+                PeakDataLevel::Missing,
+                description,
+            ),
         }
     }
 
-    pub fn new_with_peaks(description: SpectrumDescription, peaks: PeakDataLevel) -> Self {
-        let mut this = Self::new(description);
-        this.peaks = peaks;
-        this
+    pub fn new_with_peaks(
+        description: SpectrumDescription,
+        peaks: PeakDataLevel<CentroidPeak, DeconvolvedSolutionPeak>,
+    ) -> Self {
+        Self {
+            inner: MultiLayerSpectrum::from_peaks_data_levels_and_description(peaks, description),
+        }
+    }
+
+    pub fn description(&self) -> &SpectrumDescription {
+        self.inner.description()
+    }
+
+    pub fn description_mut(&mut self) -> &mut SpectrumDescription {
+        self.inner.description_mut()
+    }
+
+    pub fn peaks(
+        &self,
+    ) -> mzdata::spectrum::RefPeakDataLevel<'_, CentroidPeak, DeconvolvedSolutionPeak> {
+        self.inner.peaks()
     }
 }
 
-#[wasm_bindgen(js_class="Spectrum")]
+#[wasm_bindgen(js_class = "Spectrum")]
 impl WebSpectrum {
     #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
-        self.description.id.clone()
+        self.description().id.clone()
     }
 
     #[wasm_bindgen(getter, js_name = "startTime")]
     pub fn start_time(&self) -> f64 {
-        self.description.acquisition.start_time()
+        self.description().acquisition.start_time()
     }
 
     #[wasm_bindgen(getter, js_name = "signalContinuity")]
     pub fn signal_continuity(&self) -> WebSignalContinuity {
-        self.description.signal_continuity.into()
+        self.description().signal_continuity.into()
     }
 
     #[wasm_bindgen(getter, js_name = "isProfile")]
     pub fn is_profile(&self) -> bool {
         matches!(
-            self.description.signal_continuity,
+            self.description().signal_continuity,
             SignalContinuity::Profile
         )
     }
 
     #[wasm_bindgen(getter)]
     pub fn index(&self) -> usize {
-        self.description.index
+        self.description().index
     }
 
     #[wasm_bindgen(getter, js_name = "msLevel")]
     pub fn ms_level(&self) -> u8 {
-        self.description.ms_level
+        self.description().ms_level
     }
 
     #[wasm_bindgen(getter)]
     pub fn precursor(&self) -> Option<WebPrecursor> {
-        self.precursor.clone()
+        self.description()
+            .precursor
+            .clone()
+            .map(|p| WebPrecursor::new(p))
     }
 
     pub fn params(&self) -> Vec<WebParam> {
-        self.description
+        self.description()
             .params
             .iter()
             .cloned()
@@ -391,35 +622,85 @@ impl WebSpectrum {
             .collect()
     }
 
-    #[wasm_bindgen(js_name="pickPeaks")]
-    pub fn pick_peaks(&mut self, signal_to_noise_threshold: f32) {
-        if !self.is_profile() {
-            return
+    #[wasm_bindgen(getter, js_name = "scanEvents")]
+    pub fn scan_events(&self) -> Vec<WebScanEvent> {
+        self.description()
+            .acquisition
+            .iter()
+            .map(|e| WebScanEvent(e.clone()))
+            .collect()
+    }
+
+    pub fn copy(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
         }
-        let mut tmp_descr = SpectrumDescription::default();
-        let mut tmp_peaks = PeakDataLevel::Missing;
+    }
 
-        std::mem::swap(&mut self.description, &mut tmp_descr);
-        std::mem::swap(&mut self.peaks, &mut tmp_peaks);
+    #[wasm_bindgen(js_name = "pickPeaks")]
+    pub fn pick_peaks(&mut self, signal_to_noise_threshold: f32) {
+        if !self.is_profile() && self.inner.raw_arrays().is_none() {
+            return;
+        }
+        self.inner.pick_peaks(signal_to_noise_threshold).unwrap();
+    }
 
-        let mut spec = mzdata::spectrum::MultiLayerSpectrum::from_peaks_data_levels_and_description(tmp_peaks, tmp_descr);
-        spec.pick_peaks(signal_to_noise_threshold).unwrap();
-        (tmp_peaks, tmp_descr) = spec.into_peaks_and_description();
-        self.peaks = tmp_peaks;
-        self.description = tmp_descr;
-        self.description.signal_continuity = SignalContinuity::Centroid;
+    pub fn reprofile(&mut self, dx: f64, fwhm: f32) {
+        if self.is_profile() {
+            return;
+        }
+        self.inner.reprofile_with_shape(dx, fwhm).unwrap();
+        self.description_mut().signal_continuity = SignalContinuity::Profile;
+    }
+
+    pub fn denoise(&mut self, scale: f32) {
+        if self.inner.raw_arrays().is_none() {
+            log::warn!("Cannot denoise a spectrum that has no profile signal")
+        }
+        self.inner.denoise(scale).unwrap();
+    }
+
+    pub fn deconvolve(&mut self, score_threshold: f32, isotopic_models: Vec<WebIsotopicModel>) {
+        if self.inner.peaks.is_none() {
+            self.pick_peaks(1.0);
+        }
+        let peaks = self.inner.peaks.as_ref().unwrap();
+        let max_z = self
+            .description()
+            .precursor
+            .as_ref()
+            .and_then(|p| p.charge())
+            .unwrap_or(8)
+            .abs();
+        let models = IsotopicModelLike::from_iter(isotopic_models.iter().map(|i| i.0));
+        let mut iso_params = IsotopicPatternParams::default();
+        iso_params.incremental_truncation = Some(0.95);
+        iso_params.truncate_after = 0.9999;
+        let solution = deconvolute_peaks(
+            peaks.clone(),
+            models,
+            Tolerance::PPM(15.0),
+            (1, max_z),
+            PenalizedMSDeconvScorer::new(0.02, 2.0),
+            MaximizingFitFilter::new(score_threshold),
+            1,
+            iso_params,
+            true,
+        )
+        .unwrap();
+        self.inner.deconvoluted_peaks = Some(solution);
     }
 
     #[wasm_bindgen(getter)]
     pub fn length(&self) -> usize {
-        self.peaks.len()
+        self.inner.peaks().len()
     }
 
     #[wasm_bindgen(js_name = "hasPeak")]
     pub fn has_peak(&self, query: f64, error_tolerance: WebTolerance) -> Option<SimpleWebPeak> {
-        self.peaks
+        self.peaks()
             .search(query, error_tolerance.0)
-            .and_then(|i| self.peaks.get(i))
+            .and_then(|i| self.peaks().get(i))
             .map(|p| SimpleWebPeak {
                 mz: p.mz,
                 intensity: p.intensity,
@@ -428,15 +709,15 @@ impl WebSpectrum {
 
     #[wasm_bindgen(js_name = "allPeaksFor")]
     pub fn all_peaks_for(&self, query: f64, error_tolerance: WebTolerance) -> Vec<SimpleWebPeak> {
-        match &self.peaks {
-            PeakDataLevel::Missing => Vec::new(),
-            PeakDataLevel::RawData(_) => Vec::new(),
-            PeakDataLevel::Centroid(peak_set_vec) => peak_set_vec
+        match self.peaks() {
+            RefPeakDataLevel::Missing => Vec::new(),
+            RefPeakDataLevel::RawData(_) => Vec::new(),
+            RefPeakDataLevel::Centroid(peak_set_vec) => peak_set_vec
                 .all_peaks_for(query, error_tolerance.0)
                 .into_iter()
                 .map(|p| p.into())
                 .collect(),
-            PeakDataLevel::Deconvoluted(peak_set_vec) => peak_set_vec
+            RefPeakDataLevel::Deconvoluted(peak_set_vec) => peak_set_vec
                 .all_peaks_for(query, error_tolerance.0)
                 .into_iter()
                 .map(|p| p.into())
@@ -445,7 +726,7 @@ impl WebSpectrum {
     }
 
     pub fn at(&self, index: usize) -> Option<SimpleWebPeak> {
-        self.peaks.get(index).map(|p| SimpleWebPeak {
+        self.peaks().get(index).map(|p| SimpleWebPeak {
             mz: p.mz,
             intensity: p.intensity,
         })
@@ -453,24 +734,24 @@ impl WebSpectrum {
 
     #[wasm_bindgen(js_name = "basePeak")]
     pub fn base_peak(&self) -> SimpleWebPeak {
-        let p = self.peaks.base_peak();
+        let p = self.peaks().base_peak();
         SimpleWebPeak::from(&p)
     }
 
     pub fn tic(&self) -> f32 {
-        self.peaks.tic()
+        self.peaks().tic()
     }
 
     pub fn between(&self, low: f64, high: f64) -> Vec<SimpleWebPeak> {
-        match &self.peaks {
-            PeakDataLevel::Missing => Vec::new(),
-            PeakDataLevel::RawData(_) => Vec::new(),
-            PeakDataLevel::Centroid(peak_set_vec) => peak_set_vec
+        match &self.peaks() {
+            RefPeakDataLevel::Missing => Vec::new(),
+            RefPeakDataLevel::RawData(_) => Vec::new(),
+            RefPeakDataLevel::Centroid(peak_set_vec) => peak_set_vec
                 .between(low, high, Tolerance::PPM(20.0))
                 .iter()
                 .map(|p| p.into())
                 .collect(),
-            PeakDataLevel::Deconvoluted(peak_set_vec) => peak_set_vec
+            RefPeakDataLevel::Deconvoluted(peak_set_vec) => peak_set_vec
                 .between(low, high, Tolerance::PPM(20.0))
                 .iter()
                 .map(|p| p.into())
@@ -478,8 +759,276 @@ impl WebSpectrum {
         }
     }
 
+    /// Convert whatever the most processed data are into [`SimplePeak`]s
     #[wasm_bindgen(js_name = "toArray")]
     pub fn to_array(&self) -> Vec<SimpleWebPeak> {
-        self.peaks.iter().map(|p| p.into()).collect()
+        self.peaks().iter().map(|p| p.into()).collect()
     }
+
+    #[wasm_bindgen(js_name = "rawArrays")]
+    pub fn raw_arrays(&self) -> Option<Object> {
+        self.inner
+            .arrays
+            .as_ref()
+            .map(array_map_to_js)
+            .into_iter()
+            .flatten()
+            .next()
+    }
+
+    #[wasm_bindgen(js_name = "centroidPeaks")]
+    pub fn centroid_peaks(&self) -> Option<Vec<SimpleWebPeak>> {
+        self.inner
+            .peaks
+            .as_ref()
+            .map(|peaks| peaks.iter().map(|p| p.into()).collect())
+    }
+
+    #[wasm_bindgen(js_name = "deconvolutedPeaks")]
+    pub fn deconvoluted_peaks(&self) -> Option<Vec<SimpleWebChargedPeak>> {
+        self.inner
+            .deconvoluted_peaks
+            .as_ref()
+            .map(|peaks| peaks.iter().map(|p| p.into()).collect())
+    }
+}
+
+#[wasm_bindgen(inspectable)]
+pub struct WebFeaturePoint {
+    pub mz: f64,
+    pub time: f64,
+    pub intensity: f32,
+}
+
+impl From<(f64, f64, f32)> for WebFeaturePoint {
+    fn from(value: (f64, f64, f32)) -> Self {
+        Self {
+            mz: value.0,
+            time: value.1,
+            intensity: value.2,
+        }
+    }
+}
+
+#[wasm_bindgen(js_name = "Feature")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct WebFeature(Feature<MZ, IonMobility>);
+
+impl From<Feature<MZ, Time>> for WebFeature {
+    fn from(value: Feature<MZ, Time>) -> Self {
+        let (x, y, z) = value.into_inner();
+        Self(Feature::new(x, y, z))
+    }
+}
+
+impl From<Feature<MZ, IonMobility>> for WebFeature {
+    fn from(value: Feature<MZ, IonMobility>) -> Self {
+        let (x, y, z) = value.into_inner();
+        Self(Feature::new(x, y, z))
+    }
+}
+
+impl From<SimpleFeature<MZ, IonMobility>> for WebFeature {
+    fn from(value: SimpleFeature<MZ, IonMobility>) -> Self {
+        let (x, y, z) = value.into_inner();
+        let x: Vec<_> = std::iter::repeat_n(x, y.len()).collect();
+        Self(Feature::new(x, y, z))
+    }
+}
+
+#[wasm_bindgen(js_class = "Feature")]
+impl WebFeature {
+
+    #[wasm_bindgen(constructor)]
+    pub fn new(x: Vec<f64>, y: Vec<f64>, z: Vec<f32>) -> Self {
+        Self(Feature::new(x, y, z))
+    }
+
+    #[wasm_bindgen(getter, js_name = "startTime")]
+    pub fn start_time(&self) -> Option<f64> {
+        self.0.start_time()
+    }
+
+    #[wasm_bindgen(getter, js_name = "endTime")]
+    pub fn end_time(&self) -> Option<f64> {
+        self.0.end_time()
+    }
+
+    #[wasm_bindgen(getter, js_name = "apexTime")]
+    pub fn apex_time(&self) -> Option<f64> {
+        self.0.apex_time()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn times(&self) -> Box<[f64]> {
+        self.0.as_view().into_inner().1.into()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn intensities(&self) -> Box<[f32]> {
+        self.0.as_view().into_inner().2.into()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn mzs(&self) -> Box<[f64]> {
+        self.0.as_view().into_inner().0.into()
+    }
+
+    pub fn at(&self, index: usize) -> Option<WebFeaturePoint> {
+        self.0.at(index).map(|pt| pt.into())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn smooth(&mut self, size: usize) {
+        self.0.smooth(size);
+    }
+
+    #[wasm_bindgen(js_name="fitPeaks")]
+    pub fn fit_peaks(&self) -> FeatureFit {
+        FeatureFit(self.0.fit_peaks_with(Default::default()).peak_fits)
+    }
+
+    pub fn area(&self) -> f32 {
+        self.0.area()
+    }
+}
+
+#[wasm_bindgen]
+pub struct FeatureFit(MultiPeakShapeFit);
+
+#[wasm_bindgen]
+impl FeatureFit {
+
+    pub fn models(&self) -> Vec<JsValue> {
+        self.0.iter().map(|f| serde_wasm_bindgen::to_value(f).unwrap()).collect()
+    }
+
+    pub fn predict(&self, times: &[f64]) -> Vec<f64> {
+        self.0.predict(times).to_vec()
+    }
+
+    pub fn density(&self, time: f64) -> f64 {
+        self.0.density(time)
+    }
+
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> JsValue {
+        self.models().into()
+    }
+}
+
+#[wasm_bindgen(js_name = "IonMobilityFrame")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct WebIonMobilityFrame {
+    inner: MultiLayerIonMobilityFrame
+}
+
+impl WebIonMobilityFrame {
+    fn description(&self) -> &mzdata::spectrum::IonMobilityFrameDescription {
+        self.inner.description()
+    }
+}
+
+
+
+#[wasm_bindgen(js_class = "IonMobilityFrame")]
+impl WebIonMobilityFrame {
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> String {
+        self.description().id.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = "startTime")]
+    pub fn start_time(&self) -> f64 {
+        self.description().acquisition.start_time()
+    }
+
+    #[wasm_bindgen(getter, js_name = "signalContinuity")]
+    pub fn signal_continuity(&self) -> WebSignalContinuity {
+        self.description().signal_continuity.into()
+    }
+
+    #[wasm_bindgen(getter, js_name = "isProfile")]
+    pub fn is_profile(&self) -> bool {
+        matches!(
+            self.description().signal_continuity,
+            SignalContinuity::Profile
+        )
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn index(&self) -> usize {
+        self.description().index
+    }
+
+    #[wasm_bindgen(getter, js_name = "msLevel")]
+    pub fn ms_level(&self) -> u8 {
+        self.description().ms_level
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn precursor(&self) -> Option<WebPrecursor> {
+        self.description()
+            .precursor
+            .clone()
+            .map(|p| WebPrecursor::new(p))
+    }
+
+    pub fn params(&self) -> Vec<WebParam> {
+        self.description()
+            .params
+            .iter()
+            .cloned()
+            .map(|p| WebParam(p))
+            .collect()
+    }
+
+    #[wasm_bindgen(getter, js_name = "scanEvents")]
+    pub fn scan_events(&self) -> Vec<WebScanEvent> {
+        self.description()
+            .acquisition
+            .iter()
+            .map(|e| WebScanEvent(e.clone()))
+            .collect()
+    }
+
+    pub fn copy(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> usize {
+        match self.inner.features() {
+            mzdata::spectrum::RefFeatureDataLevel::Missing => 0,
+            mzdata::spectrum::RefFeatureDataLevel::RawData(binary_array_map3_d) => {
+                binary_array_map3_d.iter().map(|(_t, v)| v.len()).sum()
+            },
+            mzdata::spectrum::RefFeatureDataLevel::Centroid(feature_map) => feature_map.len(),
+            mzdata::spectrum::RefFeatureDataLevel::Deconvoluted(feature_map) => feature_map.len(),
+        }
+    }
+
+    pub fn at(&self, index: usize) -> Option<WebFeature> {
+        match self.inner.features() {
+            mzdata::spectrum::RefFeatureDataLevel::Missing => None,
+            mzdata::spectrum::RefFeatureDataLevel::RawData(_) => None,
+            mzdata::spectrum::RefFeatureDataLevel::Centroid(feature_map) => {
+                feature_map.as_slice().get(index).map(|f| WebFeature(f.clone()))
+            },
+            mzdata::spectrum::RefFeatureDataLevel::Deconvoluted(feature_map) => {
+                feature_map.as_slice().get(index).map(|f| {
+                    let (inner, _z) = f.clone().into_inner();
+                    let (x, y, z) = inner.into_inner();
+                    WebFeature::new(x, y, z)
+                })
+            },
+        }
+    }
+
 }

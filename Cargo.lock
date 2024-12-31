@@ -113,25 +113,12 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chemical_elements"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63aaf79a90bb224cfe39460bd069e80a7bed46dfcb25e0c06044f1b750463a7e"
-dependencies = [
- "fnv",
- "lazy_static",
- "mzpeaks 0.8.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "chemical_elements"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b6ae7685ff461980b7836bcf6a216deb83d6937f2a129adbdbc63cd3dde0fd2"
 dependencies = [
  "fnv",
- "mzpeaks 1.0.1",
+ "mzpeaks",
  "serde",
  "serde_json",
  "serde_with",
@@ -390,12 +377,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
 name = "libc"
 version = "0.2.169"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -446,9 +427,9 @@ dependencies = [
 
 [[package]]
 name = "mzdata"
-version = "0.40.0"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "931f8b52e9264ebd2186344b030cf36bc08e1b4db07052ba581f07c405dcc0cc"
+checksum = "b2ff6f5c6f039879ca86ee4fc4bd67f97f0d1f18fad6a79c3dbbbe74d5e875d7"
 dependencies = [
  "base16ct",
  "base64-simd",
@@ -460,7 +441,7 @@ dependencies = [
  "indexmap 2.1.0",
  "log",
  "md5",
- "mzpeaks 1.0.1",
+ "mzpeaks",
  "mzsignal",
  "num-traits",
  "quick-xml",
@@ -475,15 +456,16 @@ dependencies = [
 name = "mzdata-wasm"
 version = "0.1.0"
 dependencies = [
- "chemical_elements 0.3.0",
+ "chemical_elements",
  "console_error_panic_hook",
  "js-sys",
  "log",
  "mzdata",
  "mzdeisotope",
- "mzpeaks 1.0.1",
+ "mzpeaks",
  "mzsignal",
- "tracing-wasm",
+ "serde",
+ "serde-wasm-bindgen",
  "wasm-bindgen",
  "wasm-bindgen-test",
  "wasm-logger",
@@ -492,23 +474,20 @@ dependencies = [
 
 [[package]]
 name = "mzdeisotope"
-version = "0.2.3"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a30ea26a71fd3436763262f8d3a18b065f7f35d78a95ebae1d0204a8059aa7fd"
 dependencies = [
- "chemical_elements 0.5.0",
+ "chemical_elements",
  "identity-hash",
  "itertools",
  "mzdata",
- "mzpeaks 1.0.1",
+ "mzpeaks",
  "num-traits",
+ "serde",
  "thiserror",
  "tracing",
 ]
-
-[[package]]
-name = "mzpeaks"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59058c9f26d536e00596c7dc01c5d9e88e88ec294b20a6cedc5b83ac6db804f1"
 
 [[package]]
 name = "mzpeaks"
@@ -517,6 +496,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8404c04ce2422b11ae65c20ebb6817ea7b09f9ea81ca780ba5f7cf87e7775d7e"
 dependencies = [
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -528,9 +508,10 @@ dependencies = [
  "cfg-if",
  "libm",
  "log",
- "mzpeaks 1.0.1",
+ "mzpeaks",
  "nalgebra",
  "num-traits",
+ "serde",
  "thiserror",
 ]
 
@@ -730,6 +711,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.217"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -794,15 +786,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sharded-slab"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -856,16 +839,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "thread_local"
-version = "1.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
-dependencies = [
- "cfg-if",
- "once_cell",
 ]
 
 [[package]]
@@ -928,28 +901,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.3.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8189decb5ac0fa7bc8b96b7cb9b2701d60d48805aca84a238004d665fcc4008"
-dependencies = [
- "sharded-slab",
- "thread_local",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-wasm"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07"
-dependencies = [
- "tracing",
- "tracing-subscriber",
- "wasm-bindgen",
 ]
 
 [[package]]

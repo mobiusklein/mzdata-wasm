@@ -1,5 +1,5 @@
 export * as wasm from "mzdata-wasm";
-export { MZReader } from "./mem_reader";
+export { MZReader, type SpectrumGroup } from "./mem_reader";
+export { writeMGF, writeMzML } from './mem_writer';
 
-export { SimplePeak, Tolerance, Param, Precursor, SignalContinuity, SelectedIon, Spectrum } from "mzdata-wasm";
-
+export { SimplePeak, Tolerance, Param, Precursor, SignalContinuity, SelectedIon, Spectrum, IsotopicModel } from "mzdata-wasm";
