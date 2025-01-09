@@ -13,6 +13,7 @@ import {
 } from "./util";
 import { ProcessingConfiguration } from './ProcessingConfig';
 
+import useMediaQuery from "@mui/material/useMediaQuery";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
@@ -47,7 +48,8 @@ function Header({children}: HeaderProps) {
 
 // Permanent Drawer Pattern
 function SideMenu({}) {
-    const drawerWidth = "15%";
+    const isMobile = useMediaQuery("(max-width:500px)");
+    const drawerWidth = isMobile ? "10em" : "15%";
     return (
       <>
         <Drawer

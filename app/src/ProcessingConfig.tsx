@@ -64,7 +64,7 @@ export function ProcessingConfiguration() {
       <ListItem>
         <FormControl sx={{}}>
           <FormControlLabel
-            style={{ height: 20, marginLeft: "0.1em" }}
+            style={{ height: "100%", marginLeft: "0.1em" }}
             control={
               <Checkbox
                 onChange={(event) => {
@@ -107,7 +107,7 @@ export function ProcessingConfiguration() {
       <ListItem>
         <FormControl sx={{}}>
           <FormControlLabel
-            style={{ height: 20, marginLeft: "0.1em" }}
+            style={{ height: "100%", marginLeft: "0.1em" }}
             control={
               <Checkbox
                 onChange={(event) => {

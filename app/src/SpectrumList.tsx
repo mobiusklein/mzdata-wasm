@@ -11,6 +11,7 @@ import {
     TableCell,
     Paper,
 } from "@mui/material";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { TableVirtuoso, TableComponents } from "react-virtuoso";
 import { useSpectrumViewerDispatch, useSpectrumViewer, ViewerActionType } from './util';
 
@@ -167,8 +168,11 @@ export function VirtualizedTable() {
             value: index
         })
     };
+
+    const isMobile = useMediaQuery("(max-width:500px)");
+
     return (
-        <Paper style={{ height: 400, minWidth: 1000, overflow: "hidden" }}>
+        <Paper style={{ height: 400, minWidth: 1000, overflowY: "hidden", overflowX: "hidden", marginLeft: isMobile ? "10em" : 0 }}>
         <TableVirtuoso
         totalCount={mzReader ? mzReader.length : 0}
         itemContent={(index: number) => {

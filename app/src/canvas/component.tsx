@@ -1,9 +1,10 @@
 import * as React from "react";
 import { Spectrum } from "mzdata";
-import { ScanRange, SpectrumCanvas } from "./canvas";
+import { ScanRange, SpectrumCanvas, defaultHeight, defaultWidth, defaultMargins } from "./canvas";
 import "./component.css";
 import { LayerBase } from "./layers";
 import { useSpectrumViewer } from "../util";
+import useMediaQuery from "@mui/material/useMediaQuery";
 
 //https://stackoverflow.com/a/2117523/1137920
 function uuidv4(): string {
@@ -34,6 +35,8 @@ export function SpectrumCanvasComponent() {
 
   const viewerState = useSpectrumViewer()
   const spectrumData = viewerState.spectrumData;
+
+  const isMobile = useMediaQuery("(max-width:500px)");
 
   React.useLayoutEffect(() => {
     if (canvasHolder.current) {

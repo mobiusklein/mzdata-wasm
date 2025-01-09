@@ -2,17 +2,17 @@ import * as d3 from "d3";
 import _ from "lodash";
 import { Point, LayerBase } from "./layers";
 
-let defaultMargins = {
+export const defaultMargins = {
   top: 10,
   right: 30,
   bottom: 50,
   left: 90,
 };
 
-let defaultWidth = 1200 - defaultMargins.left - defaultMargins.right;
-let defaultHeight = 500 - defaultMargins.top - defaultMargins.bottom;
+export const defaultWidth = 1200 - defaultMargins.left - defaultMargins.right;
+export const defaultHeight = 500 - defaultMargins.top - defaultMargins.bottom;
 
-let DEFAULT_COLOR_CYCLE = [
+export const DEFAULT_COLOR_CYCLE = [
   "steelblue",
   "blueviolet",
   "lightseagreen",
