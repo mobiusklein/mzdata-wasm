@@ -1,6 +1,6 @@
 import * as d3 from "d3";
 import _ from "lodash";
-import { Point, LayerBase } from "./layers";
+import { Point, LayerBase, FeatureLayerBase } from "./layers";
 
 export const defaultMargins = {
   top: 10,
@@ -179,7 +179,7 @@ export class SpectrumCanvas {
     this.extentCoordinateInterval = [0, 0];
   }
 
-  minMz() {
+  minXDim() {
     if (this.layers.length === 0) {
       return 0;
     }
@@ -195,10 +195,10 @@ export class SpectrumCanvas {
   }
 
   minCoordinate() {
-    return Math.min(this.scanRange?.lowerBound || Infinity, this.minMz());
+    return Math.min(this.scanRange?.lowerBound || Infinity, this.minXDim());
   }
 
-  maxMz() {
+  maxXDim() {
     if (this.layers.length === 0) {
       return 0;
     }
@@ -211,13 +211,13 @@ export class SpectrumCanvas {
   }
 
   maxCoordinate() {
-    const maxMz = this.maxMz();
+    const maxMz = this.maxXDim();
     const upperBound = this.scanRange?.upperBound || Infinity;
     const padded = Math.min(maxMz * 1.1, maxMz + 50.0);
     return Math.min(padded, upperBound);
   }
 
-  minIntensity() {
+  minYDim() {
     if (this.layers.length === 0) {
       return 0;
     }
@@ -229,7 +229,7 @@ export class SpectrumCanvas {
     );
   }
 
-  maxIntensity() {
+  maxYDim() {
     if (this.layers.length === 0) {
       return 0;
     }
@@ -239,10 +239,17 @@ export class SpectrumCanvas {
     );
   }
 
-  maxIntensityBetween(low: number, high: number) {
+  maxYDimBetween(low: number, high: number) {
     return Math.max.apply(
       null,
       this.layers.map((layer) => layer.between(low, high).maxIntensity())
+    );
+  }
+
+  minYDimBetween(low: number, high: number) {
+    return Math.min.apply(
+      null,
+      this.layers.map((layer) => layer.between(low, high).minIntensity())
     );
   }
 
@@ -261,6 +268,8 @@ export class SpectrumCanvas {
           `translate(${this.margins.left}, ${this.margins.right})`
         );
     }
+    const minY = this.minYDim();
+    const maxY = this.maxYDim()
     // Initialize the supporting properties
     this.xScale = d3
       .scaleLinear()
@@ -268,7 +277,7 @@ export class SpectrumCanvas {
       .range([0, this.width]);
     this.yScale = d3
       .scaleLinear()
-      .domain([this.minIntensity(), this.maxIntensity() * 1.25])
+      .domain([minY * 0.75, maxY * 1.25])
       .range([this.height, 0]);
     this.xAxis = this.container
       .append("g")
@@ -306,7 +315,7 @@ export class SpectrumCanvas {
       }
       this.xScale?.domain([this.minCoordinate(), this.maxCoordinate()]);
       this.xAxis?.transition().call(d3.axisBottom(this.xScale));
-      this.yScale?.domain([this.minIntensity(), this.maxIntensity() * 1.05]);
+      this.yScale?.domain([this.minYDim() * 0.95, this.maxYDim() * 1.05]);
       this.yAxis?.transition().call(d3.axisLeft(this.yScale));
 
       this.layers.map((layer) => layer.redraw(this));
@@ -356,11 +365,16 @@ export class SpectrumCanvas {
       .attr("class", "cursor-label")
       .text("");
 
+    this.configureMouseLabel()
+  }
+
+  configureMouseLabel() {
     let self = this;
+    if (!this.container) return;
     this.container.on("mousemove", function () {
       // Binds the coordinates within `this`, the component containing the event
       let mouse = d3.mouse(this);
-      const dimLabels = self.dimensionLabels
+      const dimLabels = self.dimensionLabels;
       requestAnimationFrame((_timestamp) => {
         if (!self.xScale || !self.yScale)
           throw new Error("Uninitialized scales");
@@ -422,9 +436,11 @@ export class SpectrumCanvas {
     if (animateDuration === undefined) {
       animateDuration = 100;
     }
+
     if (!this.xScale || !this.yScale) throw new Error("Uninitialized scales");
     const maxIntensity =
-      this.maxIntensityBetween(minCoordinate, maxCoordinate) + 100.0;
+      Math.min(this.maxYDimBetween(minCoordinate, maxCoordinate) + 100.0, this.maxYDim());
+
     console.log(
       "Maximum intensity",
       maxIntensity,
@@ -468,5 +484,144 @@ export class SpectrumCanvas {
   draw() {
     this.colorCycle.reset();
     this.layers.map((layer) => layer.initArtist(this));
+  }
+}
+
+
+export class FeatureMapCanvas extends SpectrumCanvas {
+  layers: FeatureLayerBase[];
+
+  constructor(
+    containerSelector: string,
+    width: number,
+    height: number,
+    margins: any,
+    colors: string[],
+    id: any,
+    scanRange?: ScanRange | null,
+    dimensionLabels?: DimensionLabels | null
+  ) {
+    super(
+      containerSelector,
+      width,
+      height,
+      margins,
+      colors,
+      id,
+      scanRange,
+      dimensionLabels == null
+        ? { xLabel: "m/z", yLabel: "ion mobility" }
+        : dimensionLabels
+    );
+
+    this.layers = [];
+    this.updateCoordinateInterval();
+  }
+
+  minYDim() {
+    if (this.layers.length === 0) {
+      return 0;
+    }
+    return Math.min.apply(
+      null,
+      this.layers
+        .map((d) => d.minTime())
+        .filter((value) => value !== undefined && !Number.isNaN(value))
+    );
+  }
+
+  maxYDim(): number {
+    if (this.layers.length === 0) {
+      return 0;
+    }
+    return Math.max.apply(
+      null,
+      this.layers
+        .map((d) => d.maxTime())
+        .filter((value) => value !== undefined && !Number.isNaN(value))
+    );
+  }
+
+  maxYDimBetween(low: number, high: number) {
+    return Math.max.apply(
+      null,
+      this.layers.map((layer) => layer.between(low, high).maxTime())
+    );
+  }
+
+  minYDimBetween(low: number, high: number) {
+    return Math.min.apply(
+      null,
+      this.layers.map((layer) => layer.between(low, high).minTime())
+    );
+  }
+
+  setExtentByCoordinate(
+    minCoordinate: number | undefined,
+    maxCoordinate: number | undefined,
+    animateDuration?: number | undefined
+  ) {
+    if (minCoordinate === undefined) {
+      minCoordinate = this.minCoordinate();
+    }
+    if (maxCoordinate === undefined) {
+      maxCoordinate = this.maxCoordinate();
+    }
+    if (animateDuration === undefined) {
+      animateDuration = 100;
+    }
+
+    if (!this.xScale || !this.yScale) throw new Error("Uninitialized scales");
+    const maxIntensity = Math.min(
+      this.maxYDimBetween(minCoordinate, maxCoordinate) + 100.0,
+      this.maxYDim()
+    );
+
+    let minIntensity = this.minYDimBetween(minCoordinate, maxCoordinate)
+    if (minIntensity == 0) {
+      debugger
+      minIntensity = this.minYDim()
+    }
+    this.extentCoordinateInterval = [minCoordinate, maxCoordinate];
+    this.xScale.domain([minCoordinate, maxCoordinate]);
+    this.yScale.domain([minIntensity * 0.95, maxIntensity * 1.05]);
+    this.xAxis
+      ?.transition()
+      .duration(animateDuration)
+      .call(d3.axisBottom(this.xScale));
+    this.yAxis
+      ?.transition()
+      .duration(animateDuration)
+      .call(d3.axisLeft(this.yScale));
+    if (this.brush != null) {
+      const brush = this.brush;
+      this.layers.map((layer) => layer.onBrush(brush));
+    }
+    this.layers.map((layer) => layer.redraw(this));
+  }
+
+    configureMouseLabel() {
+    let self = this;
+    if (!this.container) return;
+    this.container.on("mousemove", function () {
+      // Binds the coordinates within `this`, the component containing the event
+      let mouse = d3.mouse(this);
+      const dimLabels = self.dimensionLabels;
+      requestAnimationFrame((_timestamp) => {
+        if (!self.xScale || !self.yScale)
+          throw new Error("Uninitialized scales");
+        let mzLabel = self.xScale.invert(mouse[0]);
+        let ionMobilityLabel = self.yScale.invert(mouse[1]);
+        self.pointerXLabel?.text(
+          `${dimLabels.xLabel} = ${mzLabel > 0 ? mzLabel.toFixed(3) : "-"}`
+        );
+        self.pointerYLabel?.text(
+          `IM. = ${ionMobilityLabel > 0 ? ionMobilityLabel.toPrecision(2) : "-"}`
+        );
+        for (let layer of self.layers) {
+          layer.onHover(self, { mz: mzLabel, intensity: ionMobilityLabel });
+        }
+      });
+    });
   }
 }

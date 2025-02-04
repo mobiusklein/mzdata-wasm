@@ -1,12 +1,18 @@
-use std::pin::Pin;
+use std::future::Future;
+use std::io::Write;
+use std::task::{ready, Poll};
+use std::{io, pin::Pin};
+use std::sync::Arc;
 
-use futures::Stream;
+use bytes::{Buf, BufMut, BytesMut};
+use futures::{FutureExt, Stream};
 use js_sys::{Reflect, Uint8Array};
 use log::info;
+use tokio::io::AsyncRead;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use tokio::io::{simplex, AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf};
+use tokio::{io::{simplex, AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf}, task::JoinHandle, sync::Mutex};
 
 use web_sys::{ReadableStream, ReadableStreamDefaultReader};
 
@@ -109,5 +115,96 @@ impl WebReaderPipe {
             info!("Writing {} bytes to simplex", value.length());
             this.write_half.write_all(&value.to_vec()).await.unwrap();
         }
+    }
+}
+
+enum State {
+    Idle(Option<BytesMut>),
+    Busy(JsFuture, BytesMut)
+}
+
+
+struct Inner {
+    state: Option<State>,
+}
+
+pub struct WebReaderAsyncRead {
+    stream_reader: ReadableStreamDefaultReader,
+    inner: Mutex<Inner>,
+}
+
+impl WebReaderAsyncRead {
+    pub fn new(stream_reader: ReadableStreamDefaultReader) -> Self {
+        let inner = Mutex::new(Inner {
+            state: Some(State::Idle(Some(BytesMut::new()))),
+        });
+
+        Self { stream_reader, inner }
+    }
+}
+
+impl AsyncRead for WebReaderAsyncRead {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        dst: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+
+        let me = self.get_mut();
+        let inner = me.inner.get_mut();
+
+        loop {
+            match inner.state.take().unwrap() {
+                State::Idle(ref mut buf_cell) => {
+                    let mut buf = buf_cell.take().unwrap();
+
+                    if !buf.is_empty() {
+                        dst.put_slice(buf.iter().as_slice());
+                        buf.clear();
+                        return Poll::Ready(Ok(()))
+                    }
+
+                    let f = JsFuture::from(me.stream_reader.read());
+
+                    inner.state = Some(State::Busy(f, buf));
+                },
+                State::Busy(ref mut fut, mut buf) => {
+                    match ready!(Pin::new(fut).poll(cx)) {
+                        Ok(res) => {
+                            let value = Reflect::get(&res, &JsValue::from_str("chunk")).unwrap();
+                            let done = Reflect::get(&res, &JsValue::from_str("done")).unwrap().as_bool().unwrap();
+                            if done || value.is_null() || value.is_undefined() {
+                                inner.state = Some(State::Idle(Some(buf)));
+                            } else {
+                                let value_buf = Uint8Array::from(value).to_vec();
+                                buf.extend_from_slice(&value_buf);
+                                inner.state = Some(State::Idle(Some(buf)));
+                            }
+                            return Poll::Ready(Ok(()));
+
+                        },
+                        Err(err) => {
+                            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{err:?}"))))
+                        },
+                    }
+
+                },
+            }
+        }
+    }
+}
+
+
+#[wasm_bindgen]
+pub async fn test_reader(stream_reader: ReadableStreamDefaultReader) {
+    let mut handle = WebReaderAsyncRead::new(stream_reader);
+    let mut buf = Vec::new();
+    buf.resize(250, 0);
+    handle.read(&mut buf).await.unwrap();
+
+    while !buf.is_empty() {
+        log::info!("{buf:?}");
+        buf.clear();
+        handle.read(&mut buf).await.unwrap();
     }
 }

@@ -31,20 +31,27 @@ web-sys = { version = "0.3.76", features = [
     "ReadableStream",
 ] }
 
-mzdata = { version = "0.41.0", default-features = false, features = [
+mzdata = { version = "0.44.0", default-features = false, features = [
     "mzsignal",
     'nalgebra',
     "serde"
 ] }
 
-mzpeaks = "1.0"
+mzpeaks = "1"
 chemical_elements = "0.5.0"
 mzdeisotope = { version = "0.2.5", features = ["serde"]}
 wasm-logger = "0.2.0"
 log = "0.4.20"
-mzsignal = { version = "1.0", default-features = false, features = ["nalgebra", "serde"]}
+mzsignal = { version = "1.1", default-features = false, features = ["nalgebra", "serde"]}
 serde = { version = "1.0.217", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+futures = "0.3.31"
+tokio = { version = "1.43.0", features = ["sync", "rt", "io-util"] }
+bytes = "1.9.0"
+
+wasm-bindgen-futures = "0.4.50"
+pin-project = "1.1.8"
+tokio-util = { version = "0.7.13", features = ["io-util"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"

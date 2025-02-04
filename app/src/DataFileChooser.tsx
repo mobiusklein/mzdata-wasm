@@ -40,7 +40,7 @@ export function DataFileChooser({ dataFile, setDataFile }: DataFileChooserProps)
       startIcon={<FileOpenIcon />}
     >
       { dataFile ? dataFile.name : "Choose File" }
-      <VisuallyHiddenInput type="file" onChange={onChangeHandler} multiple accept=".mzml, .mgf" />
+      <VisuallyHiddenInput type="file" onChange={onChangeHandler} multiple accept=".mzml, .mgf, .mzml.gz, .mgf.gz" />
     </Button>
   );
 }

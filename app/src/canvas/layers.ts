@@ -1,7 +1,8 @@
 import * as d3 from "d3";
 
-import { SpectrumCanvas } from "./canvas";
-import { IsolationWindow } from "../../../pkg/mzdata_wasm";
+import { FeatureMapCanvas, SpectrumCanvas } from "./canvas";
+import { IsolationWindow, Feature } from '../../../pkg/mzdata_wasm';
+import * as mzdata from 'mzdata';
 
 const defaultColor = "steelblue";
 
@@ -1015,5 +1016,468 @@ export class IsolationWindowLayer extends AbstractPointLayer {
     return super
       .styleArtist(path)
       .attr("stroke-dasharray", `${dashSize} ${gapSize}`);
+  }
+}
+
+
+
+export interface Point3D {
+  mz: number,
+  time: number,
+  intensity: number,
+}
+
+
+export abstract class FeatureLayerBase {
+  abstract get length(): number;
+  abstract get(i: number): Point3D;
+  abstract initArtist(canvas: FeatureMapCanvas): void;
+  abstract onBrush(brush: d3.BrushBehavior<unknown>): void;
+  abstract remove(): void;
+  abstract onHover(canvas: FeatureMapCanvas, value: any): void;
+
+  redraw(canvas: FeatureMapCanvas): void {
+    this.remove();
+    this.initArtist(canvas);
+  }
+
+  asArray() {
+    return Array.from(this);
+  }
+
+  [Symbol.iterator]() {
+    let self = this;
+    let i = 0;
+    const iterator = {
+      next() {
+        if (i >= self.length) {
+          return { value: { mz: 0, intensity: 0, time: 0 }, done: true };
+        }
+        const value = self.get(i);
+        i++;
+        return { value: value, done: false };
+      },
+    };
+    return iterator;
+  }
+
+  maxMz() {
+    if (this.length === 0) {
+      return 0;
+    }
+    let maxValue = 0;
+    for (let point of this) {
+      if (!point) continue;
+      if (point.mz > maxValue) {
+        maxValue = point.mz;
+      }
+    }
+    return maxValue;
+  }
+
+  minMz() {
+    if (this.length === 0) {
+      return 0;
+    }
+    let minValue = 0;
+    for (let point of this) {
+      if (!point) continue;
+      if (point.mz < minValue) {
+        minValue = point.mz;
+      }
+    }
+    return minValue;
+  }
+
+  minCoordinate() {
+    return this.minMz();
+  }
+
+  maxCoordinate() {
+    return this.maxMz();
+  }
+
+  maxIntensity() {
+    let maxValue = 0;
+    for (let point of this) {
+      if (!point) continue;
+      if (point.intensity > maxValue) {
+        maxValue = point.intensity;
+      }
+    }
+    return maxValue;
+  }
+
+  minIntensity() {
+    return 0;
+  }
+
+  minTime() {
+    const array = this.asArray();
+    if (array.length == 0) return 0;
+    return array.map((v) => v.time).reduce((x, y) => Math.min(x, y));
+  }
+
+  maxTime() {
+    const array = this.asArray();
+    if (array.length == 0) return 0;
+    return array.map((v) => v.time).reduce((x, y) => Math.max(x, y));
+  }
+
+  searchMz(mz: number) {
+    if (self.length == 0) return 0;
+    if (mz > this.maxMz()) {
+      return this.length - 1;
+    } else if (mz < this.minMz()) {
+      return 0;
+    }
+    let lo = 0;
+    let hi = this.length - 1;
+
+    while (hi !== lo) {
+      let mid = Math.trunc((hi + lo) / 2);
+      let value = this.get(mid).mz;
+      let diff = value - mz;
+      if (Math.abs(diff) < 1e-3) {
+        let bestIndex = mid;
+        let bestError = Math.abs(diff);
+        let i = mid;
+        while (i > -1) {
+          value = this.get(i).mz;
+          diff = Math.abs(value - mz);
+          if (diff < bestError) {
+            bestIndex = i;
+            bestError = diff;
+          } else {
+            break;
+          }
+          i--;
+        }
+        i = mid + 1;
+        while (i < this.length) {
+          value = this.get(i).mz;
+          diff = Math.abs(value - mz);
+          if (diff < bestError) {
+            bestIndex = i;
+            bestError = diff;
+          } else {
+            break;
+          }
+          i++;
+        }
+        return bestIndex;
+      } else if (hi - lo === 1) {
+        let bestIndex = mid;
+        let bestError = Math.abs(diff);
+        let i = mid;
+        while (i > -1) {
+          value = this.get(i).mz;
+          diff = Math.abs(value - mz);
+          if (diff < bestError) {
+            bestIndex = i;
+            bestError = diff;
+          } else {
+            break;
+          }
+          i--;
+        }
+        i = mid + 1;
+        while (i < this.length) {
+          value = this.get(i).mz;
+          diff = Math.abs(value - mz);
+          if (diff < bestError) {
+            bestIndex = i;
+            bestError = diff;
+          } else {
+            break;
+          }
+          i++;
+        }
+        return bestIndex;
+      } else if (diff > 0) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    return 0;
+  }
+
+  matchMz(mz: number, errorTolerance: number) {
+    let i = this.searchMz(mz);
+    let pt = this.get(i);
+    if (Math.abs(pt.mz - mz) / mz < errorTolerance) {
+      return pt;
+    }
+    return null;
+  }
+
+  abstract slice(begin: number, end: number): FeatureLayerBase;
+
+  between(beginMz: number, endMz: number) {
+    if (this.length == 0) return this.slice(0, 0);
+    let startIdx = this.searchMz(beginMz);
+    while (startIdx > 0 && this.get(startIdx).mz > beginMz) {
+      startIdx--;
+    }
+    if (this.get(startIdx).mz < beginMz) startIdx++;
+    let endIdx = startIdx;
+    while (endIdx < this.length && this.get(endIdx).mz < endMz) {
+      endIdx++;
+    }
+    return this.slice(startIdx, endIdx);
+  }
+}
+
+
+export class FeaturePointLayer extends FeatureLayerBase {
+  points: Point3D[];
+  metadata: any;
+  _color: string | null;
+
+  pointMarkers: any;
+  brushPatch: any
+  container: any;
+
+  constructor(points: Point3D[], metadata: any, color: string | null) {
+    super();
+    points.sort((a, b) => {
+      return a.mz - b.mz
+    })
+    this.points = points;
+    this.metadata = metadata;
+    this._color = color;
+
+    this.pointMarkers = null;
+    this.brushPatch = null;
+    this.container = null;
+  }
+
+  get length(): number {
+    return this.points.length;
+  }
+  get(i: number): Point3D {
+    return this.points[i];
+  }
+  initArtist(canvas: FeatureMapCanvas): void {
+    if (canvas.container === null) return;
+    const points = Array.from(this.points);
+    points.sort((a, b) => {
+      if (a.intensity < b.intensity) {
+        return -1;
+      } else if (a.intensity == b.intensity) {
+        return 0;
+      } else {
+        return 1;
+      }
+    });
+
+    if (canvas.container === null) {
+      return;
+    }
+
+    let zMax = this.maxIntensity();
+
+    this.container = canvas.container
+      .append("g")
+      .attr("clip-path", "url(#clip)");
+
+    this.pointMarkers = this.container
+      .selectAll()
+      .data(points)
+      .join("circle")
+      .attr("cx", (p: Point3D) => {
+        if (canvas.xScale != null) {
+          const x = canvas.xScale(p.mz);
+          return x != undefined ? x : 0.0;
+        } else {
+          return 0.0;
+        }
+      })
+      .attr("cy", (p: Point3D) => {
+        if (canvas.yScale != null) {
+          const x = canvas.yScale(p.time);
+          return x != undefined ? x : 0.0;
+        } else {
+          return 0.0;
+        }
+      })
+      .attr("r", 2)
+      .attr("fill", (p: Point3D) =>
+        d3.interpolateCool(Math.sqrt(p.intensity) / Math.sqrt(zMax))
+      );
+
+    if (canvas.brush) {
+      this.brushPatch = this.container
+        .append("g")
+        .attr("class", "brush")
+        .call(canvas.brush);
+    }
+  }
+
+  onBrush(brush: any): void {
+    if (this.container) this.container.select(".brush").call(brush.move, null);
+  }
+
+  remove(): void {
+    this.pointMarkers?.remove();
+    this.brushPatch?.remove();
+  }
+
+  redraw(canvas: FeatureMapCanvas): void {
+    this.remove()
+    this.initArtist(canvas);
+  }
+
+  onHover(canvas: FeatureMapCanvas, value: any): void {}
+
+  slice(begin: number, end: number): FeatureLayerBase {
+    return new FeaturePointLayer(
+      this.points.slice(begin, end),
+      this.metadata,
+      this._color
+    );
+  }
+}
+
+
+export interface Point3DFeature extends Point3D {
+  feature: mzdata.Feature
+}
+
+
+export class FeatureEllipseLayer extends FeatureLayerBase {
+  features: Point3DFeature[];
+  metadata: any;
+  _color: string | null;
+
+  markers: any;
+  brushPatch: any;
+  container: any;
+
+  constructor(features: mzdata.Feature[], metadata: any, color?: any) {
+    super();
+    this.features = features.map((feature) => {
+      const time = feature.apexTime;
+      const mz = feature.averageMz;
+      const intensity = feature.totalIonCurrent;
+      return { mz, time: time || 0, intensity, feature };
+    });
+    this.metadata = metadata;
+    this._color = color || null;
+    this.markers = null;
+    this.brushPatch = null;
+    this.container = null;
+  }
+
+  get length(): number {
+    return this.features.length;
+  }
+
+  get(i: number): Point3D {
+    const feat = this.features[i];
+    return feat;
+  }
+
+  minTime() {
+    const array = this.features;
+    if (array.length == 0) return 0;
+    return array.map((v) => v.feature.startTime || 0).reduce((x, y) => Math.min(x, y));
+  }
+
+  maxTime() {
+    const array = this.features;
+    if (array.length == 0) return 0;
+    return array.map((v) => v.feature.endTime || 0).reduce((x, y) => Math.max(x, y));
+  }
+
+  initArtist(canvas: FeatureMapCanvas): void {
+    if (canvas.container === null) return;
+    let features = Array.from(this.features);
+
+    features.sort((a, b) => a.intensity - b.intensity);
+
+    let zMax = this.maxIntensity();
+
+    this.container = canvas.container
+      .append("g")
+      .attr("clip-path", "url(#clip)");
+
+    this.markers = this.container
+      .selectAll()
+      .data(features)
+      .join("rect")
+      .attr("x", (p: Point3DFeature) => {
+        if (canvas.xScale != null) {
+          const mz = p.feature.mzs.reduce((a, b) => Math.min(a, b))
+          const x = canvas.xScale(mz);
+
+          return x != undefined ? x : 0.0;
+        } else {
+          return 0.0;
+        }
+      })
+      .attr("y", (p: Point3DFeature) => {
+        if (canvas.yScale != null) {
+          const x = canvas.yScale(p.feature.endTime as number) as number
+          return x != undefined ? x : 0.0;
+        } else {
+          return 0.0;
+        }
+      })
+      .attr("rx", 2)
+      .attr("ry", 2)
+      .attr("width", (p: Point3DFeature) => {
+        if (canvas.xScale == null) return 2.0
+        const minMz = p.feature.mzs.reduce((a, b) => Math.min(a, b));
+        const maxMz = p.feature.mzs.reduce((a, b) => Math.max(a, b));
+
+        const minVal = canvas.xScale(minMz) as number;
+        const maxVal = canvas.xScale(maxMz) as number;
+
+        return Math.max(Math.abs(maxVal - minVal), 2.0)
+      })
+      .attr("height", (p: Point3DFeature) => {
+        if (canvas.yScale != null) {
+          const end = canvas.yScale(p.feature.endTime as number) as number;
+          const start = canvas.yScale(p.feature.startTime as number) as number;
+          const width = Math.abs(end - start);
+          const x = width;
+
+          return x != undefined ? x : 0.0;
+        } else {
+          return 0.0;
+        }
+      })
+      .attr("fill", (p: Point3D) =>
+        d3.interpolateCool(Math.sqrt(p.intensity) / Math.sqrt(zMax))
+      )
+      .attr("fill-opacity", 0.2)
+      .attr("stroke", "black")
+      .attr("stroke-width", 0.15);
+
+    if (canvas.brush) {
+      this.brushPatch = this.container
+        .append("g")
+        .attr("class", "brush")
+        .call(canvas.brush);
+    }
+  }
+  onBrush(brush: d3.BrushBehavior<unknown>): void {
+    if (this.container) this.container.select(".brush").call(brush.move, null);
+  }
+  remove(): void {
+    this.markers?.remove();
+    this.brushPatch?.remove();
+  }
+  redraw(canvas: FeatureMapCanvas): void {
+    this.remove();
+    this.initArtist(canvas);
+  }
+  onHover(canvas: FeatureMapCanvas, value: any): void {}
+
+  slice(begin: number, end: number): FeatureLayerBase {
+    const features = this.features.slice(begin, end).map((x) => x.feature);
+    return new FeatureEllipseLayer(features, this.metadata, this._color);
   }
 }

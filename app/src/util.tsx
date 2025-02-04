@@ -1,4 +1,4 @@
-import { IsotopicModel, MZReader, Spectrum, SpectrumGroup } from "mzdata";
+import { IonMobilityFrame, IsotopicModel, MZReader, Spectrum, SpectrumGroup } from "mzdata";
 import {
   LayerBase,
   PointLayer,
@@ -6,12 +6,16 @@ import {
   PrecursorPeakLayer,
   DeconvolutedLayer,
   IsolationWindowLayer,
+  FeatureLayerBase,
+  FeaturePointLayer,
+  FeatureEllipseLayer,
 } from "./canvas/layers";
 import { createContext, Dispatch, useContext, useReducer } from "react";
+import * as mzdata from 'mzdata';
 
 export class SpectrumData {
-  spectrum: Spectrum;
-  layers: LayerBase[];
+  spectrum: Spectrum | IonMobilityFrame;
+  layers: (LayerBase | FeatureLayerBase)[];
   group: SpectrumGroup | undefined;
 
   get id() {
@@ -29,7 +33,7 @@ export class SpectrumData {
     }
   }
 
-  constructor(spectrum: Spectrum, group?: SpectrumGroup) {
+  constructor(spectrum: Spectrum | IonMobilityFrame, group?: SpectrumGroup) {
     this.spectrum = spectrum;
     this.group = group;
     this.layers = [];
@@ -37,46 +41,76 @@ export class SpectrumData {
   }
 
   buildLayers() {
-    const spectrum = this.spectrum;
-    if (spectrum.isProfile) {
-      const arrayTable: any = spectrum.rawArrays();
-      const mzs = arrayTable["m/z array"] as Float64Array;
-      const intensities = arrayTable["intensity array"] as Float32Array;
-      this.layers.push(new ProfileLayer(mzs, intensities, {}));
-      const centroids = spectrum.centroidPeaks();
-      if (centroids && centroids.length > 0) {
-        this.layers.push(new PointLayer(centroids, {}));
-      }
-    } else {
-      const points = spectrum.centroidPeaks() || [];
-      if (points && points.length > 0) {
-        this.layers.push(new PointLayer(points, {}));
-      }
+    let spectrum = this.spectrum;
+    if (spectrum instanceof Spectrum && spectrum.hasIonMobilityDimension()) {
+      spectrum = spectrum.asIonMobilityFrame();
+      this.spectrum = spectrum;
     }
-    const deconvolutedCentroids = spectrum.deconvolutedPeaks();
-    if (deconvolutedCentroids && deconvolutedCentroids.length > 0) {
-      this.layers.push(
-        new DeconvolutedLayer(deconvolutedCentroids, { strokeWidth: 0.5 })
-      );
-    }
-    if (spectrum.msLevel > 1) {
-      if (spectrum.precursor) {
-        const precIon = spectrum.precursor.ions[0];
-        const precursorPoint = {
-          mz: precIon.mz,
-          intensity: precIon.intensity,
-          charge: precIon.charge || 0,
-        };
-        this.layers.push(new PrecursorPeakLayer(precursorPoint, {}));
+    if (spectrum instanceof Spectrum) {
+      if (spectrum.isProfile) {
+        const arrayTable: any = spectrum.rawArrays();
+        const mzs = arrayTable["m/z array"] as Float64Array;
+        const intensities = arrayTable["intensity array"] as Float32Array;
+        this.layers.push(new ProfileLayer(mzs, intensities, {}));
+        const centroids = spectrum.centroidPeaks();
+        if (centroids && centroids.length > 0) {
+          this.layers.push(new PointLayer(centroids, {}));
+        }
+      } else {
+        const points = spectrum.centroidPeaks() || [];
+        if (points && points.length > 0) {
+          this.layers.push(new PointLayer(points, {}));
+        }
       }
-    }
-    if (this.group) {
-      const windows = this.group.products
-        .map((x) => x.precursor?.isolationWindow)
-        .filter((x) => x !== undefined);
-      if (windows.length > 0) {
-        const height = this.layers[0].maxIntensity();
-        this.layers.push(new IsolationWindowLayer(windows, height, {}));
+      const deconvolutedCentroids = spectrum.deconvolutedPeaks();
+      if (deconvolutedCentroids && deconvolutedCentroids.length > 0) {
+        this.layers.push(
+          new DeconvolutedLayer(deconvolutedCentroids, { strokeWidth: 0.5 })
+        );
+      }
+      if (spectrum.msLevel > 1) {
+        if (spectrum.precursor) {
+          const precIon = spectrum.precursor.ions[0];
+          const precursorPoint = {
+            mz: precIon.mz,
+            intensity: precIon.intensity,
+            charge: precIon.charge || 0,
+          };
+          this.layers.push(new PrecursorPeakLayer(precursorPoint, {}));
+        }
+      }
+      if (this.group) {
+        const windows = this.group.products
+          .map((x) => x.precursor?.isolationWindow)
+          .filter((x) => x !== undefined);
+        if (windows.length > 0) {
+          const height = this.layers[0].maxIntensity();
+          this.layers.push(new IsolationWindowLayer(windows, height, {}));
+        }
+      }
+    } else if (spectrum instanceof IonMobilityFrame) {
+      if (spectrum.features() === undefined) {
+        console.log("Extracting features")
+        if (spectrum.msLevel == 1) {
+          spectrum.extractFeatures(5, 0.1);
+        } else {
+          spectrum.extractFeatures(2, 0.1);
+        }
+        console.log("Done extracting features")
+      }
+      const points = spectrum.features()?.flatMap((feat) => {
+        const points: mzdata.FeaturePoint[] = []
+        for(let i  = 0; i<feat.length; i++) {
+          const p = feat.at(i);
+          if (p) points.push(p)
+        }
+        return points
+      })
+      if (points) {
+        const layer = new FeaturePointLayer(points, {}, null)
+        this.layers.push(layer)
+        const ellipseLayer = new FeatureEllipseLayer(spectrum.features() as mzdata.Feature[], {}, null);
+        this.layers.push(ellipseLayer);
       }
     }
   }
@@ -120,20 +154,29 @@ export class ProcessingParams {
 
   apply(spectrum: Spectrum) {
     console.log("Applying", this);
-    if (this.reprofile) {
-      spectrum.reprofile(0.001, 0.01);
-    }
-    if (this.denoiseScale > 0) {
-      spectrum.denoise(this.denoiseScale);
-    }
-    if (!spectrum.deconvolutedPeaks() && this.doDeconvolution) {
-      if (!this.isotopicModels) {
-        throw new Error(this.isotopicModels);
+    if (spectrum.hasIonMobilityDimension()) {
+      const frame = spectrum.asIonMobilityFrame()
+      if (!frame.features()) {
+        frame.extractFeatures(3, 0.1)
       }
-      spectrum.deconvolve(
-        this.deconvolutionScore,
-        this.isotopicModels.map((i) => i.copy())
-      );
+      return frame
+    } else {
+      if (this.reprofile) {
+        spectrum.reprofile(0.001, 0.01);
+      }
+      if (this.denoiseScale > 0) {
+        spectrum.denoise(this.denoiseScale);
+      }
+      if (!spectrum.deconvolutedPeaks() && this.doDeconvolution) {
+        if (!this.isotopicModels) {
+          throw new Error(this.isotopicModels);
+        }
+        spectrum.deconvolve(
+          this.deconvolutionScore,
+          this.isotopicModels.map((i) => i.copy())
+        );
+      }
+      return spectrum
     }
 
     return spectrum;

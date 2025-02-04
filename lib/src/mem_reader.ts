@@ -10,7 +10,29 @@ export class MZReader {
   reader: wasm.MemWebMZReader;
 
   static async open(file: File) {
-    const buffer = new Uint8Array(await file.arrayBuffer());
+    let buffer: Uint8Array = new Uint8Array();
+    if (file.name.endsWith(".gz")) {
+      console.log(`Decompressing ${file.name}`)
+      const readerHandle = file.stream().pipeThrough(new DecompressionStream("gzip")).getReader()
+      const chunks = []
+      let totalSize = 0
+      while (true) {
+        let { value, done } = await readerHandle.read();
+        if (done) break;
+        if (value) {
+          totalSize += value.length
+          chunks.push(value)
+        }
+      }
+      buffer = new Uint8Array(totalSize);
+      let offset = 0
+      for(let chunk of chunks) {
+        buffer.set(chunk, offset)
+        offset += chunk.length;
+      }
+    } else {
+      buffer = new Uint8Array(await file.arrayBuffer());
+    }
     const reader = wasm.MemWebMZReader.from_buffer(buffer);
     return new MZReader(reader);
   }

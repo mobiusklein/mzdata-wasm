@@ -8,10 +8,11 @@ mod mem_reader;
 mod mem_writer;
 // mod webio;
 // mod worker_reader;
-// mod asyncio;
+pub mod asyncio;
 
 pub use binds::*;
-pub use mem_reader::MemWebMZReader as WebMZReader;
+pub use mem_reader::{MemWebMZReader as WebMZReader, MemWebIMMZReader as WebIMMZReader};
+pub use asyncio::{WebReaderAsyncRead, test_reader};
 
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the

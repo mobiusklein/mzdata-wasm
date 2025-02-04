@@ -4,7 +4,8 @@ use log::{self, info};
 use mzdata::{
     prelude::{ByteArrayView, IonMobilityFrameLike, IonProperties, SpectrumLike},
     spectrum::{
-        bindata::ArrayRetrievalError, Activation, ArrayType, BinaryArrayMap, MultiLayerIonMobilityFrame, MultiLayerSpectrum, PeakDataLevel, RefPeakDataLevel, ScanEvent
+        bindata::ArrayRetrievalError, Activation, ArrayType, BinaryArrayMap,
+        MultiLayerIonMobilityFrame, MultiLayerSpectrum, PeakDataLevel, RefPeakDataLevel, ScanEvent,
     },
 };
 use wasm_bindgen::prelude::*;
@@ -262,8 +263,18 @@ impl WebIsolationWindow {
     #[wasm_bindgen(js_name = "toJSON")]
     pub fn to_json(&self) -> Object {
         let inst = Object::new();
-        Reflect::set(&inst, &JsValue::from_str("lower_bound"), &JsValue::from_f64(self.0.lower_bound as f64)).unwrap();
-        Reflect::set(&inst, &JsValue::from_str("upper_bound"), &JsValue::from_f64(self.0.upper_bound as f64)).unwrap();
+        Reflect::set(
+            &inst,
+            &JsValue::from_str("lower_bound"),
+            &JsValue::from_f64(self.0.lower_bound as f64),
+        )
+        .unwrap();
+        Reflect::set(
+            &inst,
+            &JsValue::from_str("upper_bound"),
+            &JsValue::from_f64(self.0.upper_bound as f64),
+        )
+        .unwrap();
         inst
     }
 }
@@ -291,8 +302,18 @@ impl WebScanWindow {
     #[wasm_bindgen(js_name = "toJSON")]
     pub fn to_json(&self) -> Object {
         let inst = Object::new();
-        Reflect::set(&inst, &JsValue::from_str("lower_bound"), &JsValue::from_f64(self.0.lower_bound as f64)).unwrap();
-        Reflect::set(&inst, &JsValue::from_str("upper_bound"), &JsValue::from_f64(self.0.upper_bound as f64)).unwrap();
+        Reflect::set(
+            &inst,
+            &JsValue::from_str("lower_bound"),
+            &JsValue::from_f64(self.0.lower_bound as f64),
+        )
+        .unwrap();
+        Reflect::set(
+            &inst,
+            &JsValue::from_str("upper_bound"),
+            &JsValue::from_f64(self.0.upper_bound as f64),
+        )
+        .unwrap();
         inst
     }
 }
@@ -439,7 +460,7 @@ impl WebPrecursor {
         }
     }
 
-    #[wasm_bindgen(getter, js_name="precursorScanID")]
+    #[wasm_bindgen(getter, js_name = "precursorScanID")]
     pub fn precursor_id(&self) -> Option<String> {
         self._inner.precursor_id.clone()
     }
@@ -505,6 +526,7 @@ impl From<MultiLayerSpectrum<CentroidPeak, DeconvolvedSolutionPeak>> for WebSpec
                 if let Some(n) = v.data_len().ok() {
                     if n > 0 {
                         info!("Converting {} with {} items", k, n);
+                        break;
                     }
                 }
             }
@@ -791,9 +813,42 @@ impl WebSpectrum {
             .as_ref()
             .map(|peaks| peaks.iter().map(|p| p.into()).collect())
     }
+
+    #[wasm_bindgen(js_name = "hasIonMobilityDimension")]
+    pub fn has_ion_mobility_dimension(&self) -> bool {
+        self.inner.has_ion_mobility_dimension()
+    }
+
+    #[wasm_bindgen(js_name = "asIonMobilityFrame")]
+    pub fn as_ion_mobility_frame(&self) -> Result<WebIonMobilityFrame, String> {
+        if self.has_ion_mobility_dimension() {
+            let arrays = self
+                .inner
+                .arrays
+                .as_ref()
+                .ok_or_else(|| "No data arrays found".to_string())?;
+            let arrays = arrays
+                .clone()
+                .stack_ion_mobility()
+                .map_err(|e| e.to_string())?;
+
+            let frame = MultiLayerIonMobilityFrame::new(
+                Some(arrays),
+                None,
+                None,
+                self.description().clone().into(),
+            );
+
+            let this = WebIonMobilityFrame { inner: frame };
+
+            Ok(this)
+        } else {
+            Err("No ion mobility dimension found".into())
+        }
+    }
 }
 
-#[wasm_bindgen(inspectable)]
+#[wasm_bindgen(inspectable, js_name = "FeaturePoint")]
 pub struct WebFeaturePoint {
     pub mz: f64,
     pub time: f64,
@@ -838,7 +893,6 @@ impl From<SimpleFeature<MZ, IonMobility>> for WebFeature {
 
 #[wasm_bindgen(js_class = "Feature")]
 impl WebFeature {
-
     #[wasm_bindgen(constructor)]
     pub fn new(x: Vec<f64>, y: Vec<f64>, z: Vec<f32>) -> Self {
         Self(Feature::new(x, y, z))
@@ -887,7 +941,17 @@ impl WebFeature {
         self.0.smooth(size);
     }
 
-    #[wasm_bindgen(js_name="fitPeaks")]
+    #[wasm_bindgen(js_name = "totalIonCurrent", getter)]
+    pub fn tic(&self) -> f32 {
+        self.0.total_intensity()
+    }
+
+    #[wasm_bindgen(js_name = "averageMz", getter)]
+    pub fn average_mz(&self) -> f64 {
+        self.0.mz()
+    }
+
+    #[wasm_bindgen(js_name = "fitPeaks")]
     pub fn fit_peaks(&self) -> FeatureFit {
         FeatureFit(self.0.fit_peaks_with(Default::default()).peak_fits)
     }
@@ -902,9 +966,11 @@ pub struct FeatureFit(MultiPeakShapeFit);
 
 #[wasm_bindgen]
 impl FeatureFit {
-
     pub fn models(&self) -> Vec<JsValue> {
-        self.0.iter().map(|f| serde_wasm_bindgen::to_value(f).unwrap()).collect()
+        self.0
+            .iter()
+            .map(|f| serde_wasm_bindgen::to_value(f).unwrap())
+            .collect()
     }
 
     pub fn predict(&self, times: &[f64]) -> Vec<f64> {
@@ -924,7 +990,7 @@ impl FeatureFit {
 #[wasm_bindgen(js_name = "IonMobilityFrame")]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct WebIonMobilityFrame {
-    inner: MultiLayerIonMobilityFrame
+    inner: MultiLayerIonMobilityFrame,
 }
 
 impl WebIonMobilityFrame {
@@ -933,7 +999,11 @@ impl WebIonMobilityFrame {
     }
 }
 
-
+impl From<MultiLayerIonMobilityFrame> for WebIonMobilityFrame {
+    fn from(value: MultiLayerIonMobilityFrame) -> Self {
+        Self { inner: value }
+    }
+}
 
 #[wasm_bindgen(js_class = "IonMobilityFrame")]
 impl WebIonMobilityFrame {
@@ -1008,7 +1078,7 @@ impl WebIonMobilityFrame {
             mzdata::spectrum::RefFeatureDataLevel::Missing => 0,
             mzdata::spectrum::RefFeatureDataLevel::RawData(binary_array_map3_d) => {
                 binary_array_map3_d.iter().map(|(_t, v)| v.len()).sum()
-            },
+            }
             mzdata::spectrum::RefFeatureDataLevel::Centroid(feature_map) => feature_map.len(),
             mzdata::spectrum::RefFeatureDataLevel::Deconvoluted(feature_map) => feature_map.len(),
         }
@@ -1018,17 +1088,63 @@ impl WebIonMobilityFrame {
         match self.inner.features() {
             mzdata::spectrum::RefFeatureDataLevel::Missing => None,
             mzdata::spectrum::RefFeatureDataLevel::RawData(_) => None,
-            mzdata::spectrum::RefFeatureDataLevel::Centroid(feature_map) => {
-                feature_map.as_slice().get(index).map(|f| WebFeature(f.clone()))
-            },
+            mzdata::spectrum::RefFeatureDataLevel::Centroid(feature_map) => feature_map
+                .as_slice()
+                .get(index)
+                .map(|f| WebFeature(f.clone())),
             mzdata::spectrum::RefFeatureDataLevel::Deconvoluted(feature_map) => {
                 feature_map.as_slice().get(index).map(|f| {
                     let (inner, _z) = f.clone().into_inner();
                     let (x, y, z) = inner.into_inner();
                     WebFeature::new(x, y, z)
                 })
-            },
+            }
         }
     }
 
+    #[wasm_bindgen(js_name = "extractFeatures")]
+    pub fn extract_features(&mut self, min_length: usize, maximum_gap_size: f64) {
+        self.inner
+            .extract_features_simple(Tolerance::PPM(15.0), min_length, maximum_gap_size, None)
+            .unwrap();
+    }
+
+    pub fn features(&self) -> Option<Vec<WebFeature>> {
+        self.inner
+            .features
+            .as_ref()
+            .map(|fs| fs.iter().map(|f| WebFeature(f.clone())).collect())
+    }
+
+    #[wasm_bindgen(js_name = "rawArrays")]
+    pub fn raw_arrays(&self) -> Result<Object, JsError> {
+        let mut all_mzs = Vec::new();
+        let mut all_intens = Vec::new();
+        let mut all_ion_mobility = Vec::new();
+        if let Some(arrays) = self.inner.arrays.as_ref() {
+            for (im, arrays) in arrays.iter() {
+                let mzs = arrays.mzs()?;
+                let intens = arrays.intensities()?;
+                all_mzs.extend_from_slice(&mzs);
+                all_intens.extend_from_slice(&intens);
+                all_ion_mobility.extend(std::iter::repeat(im));
+            }
+        }
+        let mzs_js = Float64Array::new_with_length(all_mzs.len() as u32);
+        mzs_js.copy_from(&all_mzs);
+        let ims_js = Float64Array::new_with_length(all_mzs.len() as u32);
+        ims_js.copy_from(&all_ion_mobility);
+        let intens_js = Float32Array::new_with_length(all_mzs.len() as u32);
+        intens_js.copy_from(&all_intens);
+
+        let arrays = Object::new();
+        Reflect::set(&arrays, &JsValue::from_str("m/z array"), &mzs_js)
+            .map_err(|e| JsError::new(&e.as_string().unwrap_or_default()))?;
+        Reflect::set(&arrays, &JsValue::from_str("intensity array"), &intens_js)
+            .map_err(|e| JsError::new(&e.as_string().unwrap_or_default()))?;
+        Reflect::set(&arrays, &JsValue::from_str("ion mobility array"), &ims_js)
+            .map_err(|e| JsError::new(&e.as_string().unwrap_or_default()))?;
+
+        Ok(arrays)
+    }
 }
