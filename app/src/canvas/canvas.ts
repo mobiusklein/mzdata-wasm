@@ -1,6 +1,15 @@
 import * as d3 from "d3";
 import _ from "lodash";
-import { Point, LayerBase, FeatureLayerBase } from "./layers";
+import {
+  LayerBase,
+  FeatureMapLayerBase,
+  MZPoint,
+  PointLike,
+  FeatureCanvasPoint,
+  FeatureProfilePoint,
+  FeatureProfileLayerBase,
+} from "./layers";
+import { uuidv4 } from "../util";
 
 export const defaultMargins = {
   top: 10,
@@ -24,9 +33,9 @@ export const DEFAULT_COLOR_CYCLE = [
 ];
 
 export class ColorCycle {
-  colors: string[]
-  index: number
-  length: number
+  colors: string[];
+  index: number;
+  length: number;
 
   constructor(colors: string[]) {
     if (!colors || colors.length === 0) {
@@ -52,21 +61,26 @@ export class ColorCycle {
 }
 
 export interface ScanRange {
-    lowerBound: number
-    upperBound: number
+  lowerBound: number;
+  upperBound: number;
 }
 
 export interface DimensionLabels {
-    xLabel: string,
-    yLabel: string,
+  xLabel: string;
+  yLabel: string;
 }
 
-export class SpectrumCanvas {
+export interface CanvasUpdateEvent<T extends PointLike> {
+  canvas: MSCanvasBase<T>;
+}
+
+export class MSCanvasBase<T extends PointLike> {
   spectrumID: any;
 
   containerSelector: string;
-  container: d3.Selection<SVGGElement, Point, HTMLElement, any> | null;
-  layers: LayerBase[];
+  outer: d3.Selection<SVGSVGElement, PointLike, HTMLElement, any> | null;
+  container: d3.Selection<SVGGElement, PointLike, HTMLElement, any> | null;
+  layers: LayerBase<T>[];
   extentCoordinateInterval: [number, number];
   scanRange: ScanRange | null;
 
@@ -74,25 +88,32 @@ export class SpectrumCanvas {
   height: number;
   margins: any;
   dimensionLabels: DimensionLabels;
+  eventHandlers: Function[];
+  emitEvent: Function;
 
   xScale: d3.ScaleLinear<number, number> | null;
   yScale: d3.ScaleLinear<number, number> | null;
-  xAxis: d3.Selection<SVGGElement, Point, HTMLElement, any> | null;
-  yAxis: d3.Selection<SVGGElement, Point, HTMLElement, any> | null;
+  xAxis: d3.Selection<SVGGElement, PointLike, HTMLElement, any> | null;
+  yAxis: d3.Selection<SVGGElement, PointLike, HTMLElement, any> | null;
 
-  xLabel: d3.Selection<SVGTextElement, Point, HTMLElement, any> | null;
-  yLabel: d3.Selection<SVGTextElement, Point, HTMLElement, any> | null;
+  xLabel: d3.Selection<SVGTextElement, PointLike, HTMLElement, any> | null;
+  yLabel: d3.Selection<SVGTextElement, PointLike, HTMLElement, any> | null;
 
   colorCycle: ColorCycle;
 
   idledTimeout: number | null;
   brush: any | null;
-  clip: d3.Selection<d3.BaseType, Point, HTMLElement, any> | null;
+  clip: d3.Selection<d3.BaseType, PointLike, HTMLElement, any> | null;
 
-  pointerXLabel: d3.Selection<SVGTextElement, Point, HTMLElement, any> | null;
+  pointerXLabel: d3.Selection<
+    SVGTextElement,
+    PointLike,
+    HTMLElement,
+    any
+  > | null;
   pointerYLabel: d3.Selection<
     SVGTextElement,
-    Point,
+    PointLike,
     HTMLElement,
     any
   > | null;
@@ -118,6 +139,7 @@ export class SpectrumCanvas {
       this.margins = defaultMargins;
     }
 
+    this.outer = null;
     this.container = null;
     this.xScale = null;
     this.yScale = null;
@@ -127,7 +149,9 @@ export class SpectrumCanvas {
     this.xLabel = null;
     this.yLabel = null;
 
-    this.dimensionLabels = dimensionLabels ? dimensionLabels : {xLabel: "m/z", yLabel: "Relative Intensity"};
+    this.dimensionLabels = dimensionLabels
+      ? dimensionLabels
+      : { xLabel: "m/z", yLabel: "Relative Intensity" };
 
     this.pointerXLabel = null;
     this.pointerYLabel = null;
@@ -141,11 +165,12 @@ export class SpectrumCanvas {
     this.layers = [];
     this.colorCycle = new ColorCycle(colors);
     this.extentCoordinateInterval = [0, 0];
-
+    this.eventHandlers = [];
+    this.emitEvent = _.debounce(this._emitUpdateEvent, 5)
     this.updateCoordinateInterval();
   }
 
-  addLayer(layer: LayerBase) {
+  addLayer(layer: LayerBase<T>) {
     this.layers.push(layer);
     if (this.container) {
       layer.initArtist(this);
@@ -153,7 +178,7 @@ export class SpectrumCanvas {
     }
   }
 
-  addLayers(layers: LayerBase[]) {
+  addLayers(layers: LayerBase<T>[]) {
     for (let layer of layers) {
       this.layers.push(layer);
       if (this.container) {
@@ -177,21 +202,27 @@ export class SpectrumCanvas {
     this.remove();
     this.layers = [];
     this.extentCoordinateInterval = [0, 0];
+    this.container?.remove();
+    this.outer?.remove();
+    this.outer = null;
+    this.container = null;
   }
 
   minXDim() {
     if (this.layers.length === 0) {
       return 0;
     }
-    return Math.max(
+    const dim = Math.max(
       0,
       Math.min.apply(
         null,
         this.layers
-          .map((d) => d.minMz())
+          .filter((d) => d.length > 0)
+          .map((d) => d.minX())
           .filter((value) => value !== undefined && !Number.isNaN(value))
-      ) - 50
+      )
     );
+    return dim - 50 > 0 ? dim - 50 : 0;
   }
 
   minCoordinate() {
@@ -205,7 +236,7 @@ export class SpectrumCanvas {
     return Math.max.apply(
       null,
       this.layers
-        .map((d) => d.maxMz())
+        .map((d) => d.maxX())
         .filter((value) => value !== undefined && !Number.isNaN(value))
     );
   }
@@ -224,7 +255,7 @@ export class SpectrumCanvas {
     return Math.min.apply(
       null,
       this.layers
-        .map((d) => d.minIntensity())
+        .map((d) => d.minY())
         .filter((value) => value !== undefined && !Number.isNaN(value))
     );
   }
@@ -235,41 +266,46 @@ export class SpectrumCanvas {
     }
     return Math.max.apply(
       null,
-      this.layers.map((d) => d.maxIntensity())
+      this.layers.map((d) => d.maxY())
     );
   }
 
   maxYDimBetween(low: number, high: number) {
     return Math.max.apply(
       null,
-      this.layers.map((layer) => layer.between(low, high).maxIntensity())
+      this.layers.map((layer) => layer.between(low, high).maxY())
     );
   }
 
   minYDimBetween(low: number, high: number) {
     return Math.min.apply(
       null,
-      this.layers.map((layer) => layer.between(low, high).minIntensity())
+      this.layers.map((layer) => layer.between(low, high).minY())
     );
   }
 
   initContainer() {
     if (!this.container) {
+      console.log(
+        `Initializing canvas ${this.spectrumID} @ ${this.containerSelector}`
+      );
       // Initialize the SVG container for the first time. Do not do this again because this element is
       // not removed by its own .remove()
-      this.container = d3
-        .select<SVGElement, Point>(this.containerSelector)
+      this.outer = d3
+        .select<SVGElement, PointLike>(this.containerSelector)
         .append("svg")
         .attr("width", this.width + this.margins.left + this.margins.right)
-        .attr("height", this.height + this.margins.top + this.margins.bottom)
+        .attr("height", this.height + this.margins.top + this.margins.bottom);
+      this.container = this.outer
         .append("g")
         .attr(
           "transform",
           `translate(${this.margins.left}, ${this.margins.right})`
-        );
+        )
+        .attr("id", uuidv4());
     }
     const minY = this.minYDim();
-    const maxY = this.maxYDim()
+    const maxY = this.maxYDim();
     // Initialize the supporting properties
     this.xScale = d3
       .scaleLinear()
@@ -309,16 +345,7 @@ export class SpectrumCanvas {
       );
 
     this.container.on("dblclick", () => {
-      console.log("Resetting Canvas...");
-      if (!this.xScale || !this.yScale) {
-        throw new Error("Uninitialized scales");
-      }
-      this.xScale?.domain([this.minCoordinate(), this.maxCoordinate()]);
-      this.xAxis?.transition().call(d3.axisBottom(this.xScale));
-      this.yScale?.domain([this.minYDim() * 0.95, this.maxYDim() * 1.05]);
-      this.yAxis?.transition().call(d3.axisLeft(this.yScale));
-
-      this.layers.map((layer) => layer.redraw(this));
+      this.resetZoom();
     });
 
     this.yLabel = this.container
@@ -345,6 +372,12 @@ export class SpectrumCanvas {
       .attr("class", "axis-label")
       .text(this.dimensionLabels.xLabel);
 
+    this.createMouseLabel()
+    this.configureMouseLabel();
+  }
+
+  createMouseLabel() {
+    if (this.container === null) return
     this.pointerXLabel = this.container
       .append("text")
       .attr(
@@ -364,8 +397,6 @@ export class SpectrumCanvas {
       .style("text-anchor", "left")
       .attr("class", "cursor-label")
       .text("");
-
-    this.configureMouseLabel()
   }
 
   configureMouseLabel() {
@@ -393,6 +424,14 @@ export class SpectrumCanvas {
     });
   }
 
+  resetZoom() {
+    console.log("Resetting Canvas...");
+    if (!this.xScale || !this.yScale) {
+      throw new Error("Uninitialized scales");
+    }
+    this.setExtentByCoordinate(undefined, undefined);
+  }
+
   remove() {
     // Remove all elements from the DOM
     this.yAxis?.remove();
@@ -403,6 +442,7 @@ export class SpectrumCanvas {
     this.pointerYLabel?.remove();
     this.layers.map((layer) => layer.remove());
     this.container?.exit().remove();
+    this.outer?.exit().remove();
   }
 
   render() {
@@ -438,8 +478,10 @@ export class SpectrumCanvas {
     }
 
     if (!this.xScale || !this.yScale) throw new Error("Uninitialized scales");
-    const maxIntensity =
-      Math.min(this.maxYDimBetween(minCoordinate, maxCoordinate) + 100.0, this.maxYDim());
+    const maxIntensity = Math.min(
+      this.maxYDimBetween(minCoordinate, maxCoordinate) + 100.0,
+      this.maxYDim()
+    );
 
     console.log(
       "Maximum intensity",
@@ -463,6 +505,25 @@ export class SpectrumCanvas {
       this.layers.map((layer) => layer.onBrush(brush));
     }
     this.layers.map((layer) => layer.redraw(this));
+    this.emitUpdateEvent()
+  }
+
+  emitUpdateEvent() {
+    this.emitEvent()
+  }
+
+  _emitUpdateEvent() {
+    this.eventHandlers.forEach(f => {
+      f(this)
+    })
+  }
+
+  addRedrawEventListener(f: Function) {
+    this.eventHandlers.push(f)
+  }
+
+  removeRedrawEventHandlers() {
+    this.eventHandlers = []
   }
 
   updateChart() {
@@ -487,9 +548,10 @@ export class SpectrumCanvas {
   }
 }
 
+export class SpectrumCanvas extends MSCanvasBase<MZPoint> {}
 
-export class FeatureMapCanvas extends SpectrumCanvas {
-  layers: FeatureLayerBase[];
+export class FeatureMapCanvas extends MSCanvasBase<FeatureCanvasPoint> {
+  layers: FeatureMapLayerBase[];
 
   constructor(
     containerSelector: string,
@@ -525,6 +587,7 @@ export class FeatureMapCanvas extends SpectrumCanvas {
     return Math.min.apply(
       null,
       this.layers
+        .filter((d) => d.length > 0)
         .map((d) => d.minTime())
         .filter((value) => value !== undefined && !Number.isNaN(value))
     );
@@ -577,10 +640,9 @@ export class FeatureMapCanvas extends SpectrumCanvas {
       this.maxYDim()
     );
 
-    let minIntensity = this.minYDimBetween(minCoordinate, maxCoordinate)
+    let minIntensity = this.minYDimBetween(minCoordinate, maxCoordinate);
     if (minIntensity == 0) {
-      debugger
-      minIntensity = this.minYDim()
+      minIntensity = this.minYDim();
     }
     this.extentCoordinateInterval = [minCoordinate, maxCoordinate];
     this.xScale.domain([minCoordinate, maxCoordinate]);
@@ -596,11 +658,14 @@ export class FeatureMapCanvas extends SpectrumCanvas {
     if (this.brush != null) {
       const brush = this.brush;
       this.layers.map((layer) => layer.onBrush(brush));
+      this.emitUpdateEvent();
     }
     this.layers.map((layer) => layer.redraw(this));
+
+    this.emitUpdateEvent();
   }
 
-    configureMouseLabel() {
+  configureMouseLabel() {
     let self = this;
     if (!this.container) return;
     this.container.on("mousemove", function () {
@@ -616,12 +681,147 @@ export class FeatureMapCanvas extends SpectrumCanvas {
           `${dimLabels.xLabel} = ${mzLabel > 0 ? mzLabel.toFixed(3) : "-"}`
         );
         self.pointerYLabel?.text(
-          `IM. = ${ionMobilityLabel > 0 ? ionMobilityLabel.toPrecision(2) : "-"}`
+          `IM. = ${ionMobilityLabel > 0 ? ionMobilityLabel.toFixed(3) : "-"}`
         );
         for (let layer of self.layers) {
-          layer.onHover(self, { mz: mzLabel, intensity: ionMobilityLabel });
+          layer.onHover(self, { mz: mzLabel, time: ionMobilityLabel });
         }
       });
     });
+  }
+}
+
+export class FeatureProfileCanvas extends MSCanvasBase<FeatureProfilePoint> {
+  sourceCanvas: FeatureMapCanvas | null;
+  originalLayers: LayerBase<FeatureProfilePoint>[];
+
+  constructor(
+    containerSelector: string,
+    width: number,
+    height: number,
+    margins: any,
+    colors: string[],
+    id: any,
+    scanRange?: ScanRange | null,
+    dimensionLabels?: DimensionLabels | null,
+    sourceCanvas?: FeatureMapCanvas | null
+  ) {
+    super(
+      containerSelector,
+      width,
+      height,
+      margins,
+      colors,
+      id,
+      scanRange,
+      dimensionLabels == null
+        ? { xLabel: "time", yLabel: "intensity" }
+        : dimensionLabels
+    );
+    this.sourceCanvas = sourceCanvas === undefined ? null : sourceCanvas;
+    this.originalLayers = [];
+  }
+
+  initContainer() {
+    super.initContainer();
+    this.container
+      ?.append("marker")
+      .attr("id", "marker-circle")
+      .attr("markerWidth", 3)
+      .attr("markerHeight", 3)
+      .attr("refX", 3)
+      .attr("refY", 3)
+      .attr("markerUnits", "strokeWidth")
+      .append("circle")
+      .attr("cy", 3)
+      .attr("cx", 3)
+      .attr("r", 2)
+      .attr("stroke", "context-stroke")
+      .attr("fill", "context-fill");
+  }
+
+  clear(): void {
+    super.clear();
+    this.originalLayers = [];
+  }
+
+  addLayer(layer: LayerBase<FeatureProfilePoint>): void {
+    super.addLayer(layer);
+  }
+
+  addLayers(layers: LayerBase<FeatureProfilePoint>[]): void {
+    super.addLayers(layers);
+  }
+
+  setMzRange(startMz?: number, endMz?: number) {
+    if (this.originalLayers.length == 0) {
+      this.originalLayers = this.layers;
+    }
+    this.remove();
+    if (!startMz || !endMz) {
+      this.layers = this.originalLayers;
+    } else {
+      this.layers = this.originalLayers;
+      const acc = [];
+      for (let layer of this.layers) {
+        if (layer instanceof FeatureProfileLayerBase) {
+          acc.push(layer.applyMzFilter(startMz, endMz));
+        } else {
+          acc.push(layer);
+        }
+      }
+      this.originalLayers = this.layers;
+      this.layers = acc;
+    }
+    this.render();
+  }
+
+  draw(): void {
+    super.draw();
+  }
+
+  render(): void {
+    super.render();
+    console.log("source", this.sourceCanvas);
+  }
+
+  minXDim() {
+    if (this.layers.length === 0) {
+      return 0;
+    }
+    const dim = Math.max(
+      0,
+      Math.min.apply(
+        null,
+        this.layers
+          .filter((d) => d.length > 0)
+          .map((d) => d.minX())
+          .filter((value) => value !== undefined && !Number.isNaN(value))
+      )
+    );
+    return dim - 0.1 > 0 ? dim - 0.1 : dim;
+  }
+
+  createMouseLabel() {
+    if (this.container === null) return;
+    this.pointerXLabel = this.container
+      .append("text")
+      .attr(
+        "transform",
+        `translate(${this.width * 0.01},${this.height * 0.02})`
+      )
+      .style("text-anchor", "left")
+      .attr("class", "cursor-label")
+      .text("");
+
+    this.pointerYLabel = this.container
+      .append("text")
+      .attr(
+        "transform",
+        `translate(${this.width * 0.01},${this.height * 0.08})`
+      )
+      .style("text-anchor", "left")
+      .attr("class", "cursor-label")
+      .text("");
   }
 }

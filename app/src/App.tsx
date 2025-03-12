@@ -4,7 +4,7 @@ import './App.css'
 import { DataFileChooser } from "./DataFileChooser";
 import { MZReader } from "mzdata";
 import { SpectrumList } from './SpectrumList';
-import { SpectrumCanvasComponent } from "./canvas/component"
+import { SpectrumCanvasComponent2 } from "./canvas/component"
 import {
     SpectrumViewerProvider,
     useSpectrumViewer,
@@ -115,7 +115,7 @@ function Frame() {
           <SideMenu />
         </div>
         <div>
-          <SpectrumCanvasComponent />
+          <SpectrumCanvasComponent2 />
         </div>
 
         <div>{viewState.mzReader ? <SpectrumList /> : <div></div>}</div>

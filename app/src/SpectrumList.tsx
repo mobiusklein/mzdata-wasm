@@ -59,59 +59,74 @@ interface Column {
     numeric: boolean;
     width?: number | undefined;
     getter: Function;
+    class?: string | undefined
 }
 
 const columnDefs: Column[] = [
-    {
-        name: "Index",
-        numeric: true,
-        getter: (spectrum: Spectrum) => spectrum.index,
-    },
-    {
-        name: "Native ID",
-        numeric: false,
-        getter: (spectrum: Spectrum) => spectrum.id,
-        width: 400,
-    },
-    {
-        name: "Time",
-        numeric: true,
-        format: (x: number) => x.toFixed(3),
-        getter: (spectrum: Spectrum) => spectrum.startTime,
-    },
-    {
-        name: "Base Peak m/z",
-        numeric: true,
-        format: (x: number) => x.toFixed(2),
-        getter: (spectrum: Spectrum) =>
-            spectrum.params().filter((par) => par.name == "base peak m/z")[0]?.value,
-    },
-    {
-        name: "Base Peak Int.",
-        numeric: true,
-        format: (x: number) => x.toExponential(2),
-        getter: (spectrum: Spectrum) =>
-            spectrum.params().filter((par) => par.name == "base peak intensity")[0]
+  {
+    name: "Index",
+    numeric: true,
+    getter: (spectrum: Spectrum) => spectrum.index,
+  },
+  {
+    name: "Native ID",
+    numeric: false,
+    getter: (spectrum: Spectrum) => spectrum.id,
+    width: 350,
+    class: "native-id-column",
+  },
+  {
+    name: "Time",
+    numeric: true,
+    format: (x: number) => x.toFixed(3),
+    getter: (spectrum: Spectrum) => spectrum.startTime,
+  },
+  {
+    name: "Base Peak m/z",
+    numeric: true,
+    format: (x: number) => x.toFixed(2),
+    getter: (spectrum: Spectrum) =>
+      spectrum.params().filter((par) => par.name == "base peak m/z")[0]?.value,
+  },
+  {
+    name: "Base Peak Int.",
+    numeric: true,
+    format: (x: number) => x.toExponential(2),
+    getter: (spectrum: Spectrum) =>
+      spectrum.params().filter((par) => par.name == "base peak intensity")[0]
         ?.value,
+  },
+  {
+    name: "MS Level",
+    numeric: true,
+    getter: (spectrum: Spectrum) => spectrum.msLevel,
+  },
+  {
+    name: "Prec. m/z",
+    numeric: true,
+    format: (x: number) => x.toFixed(3),
+    getter: (spectrum: Spectrum) =>
+      spectrum.precursor ? spectrum.precursor.ions[0].mz : null,
+  },
+  {
+    name: "Prec. z",
+    width: 40,
+    numeric: true,
+    getter: (spectrum: Spectrum) =>
+      spectrum.precursor ? spectrum.precursor.ions[0].charge : null,
+  },
+  {
+    name: "Ion Mob.",
+    numeric: true,
+    format: (x: number) => x.toFixed(2),
+    getter: (spectrum: Spectrum) => {
+      return spectrum.scanEvents.map((x) =>
+        x.params().find((p) => {
+          return p.name == "inverse reduced ion mobility";
+        })
+      )[0]?.value;
     },
-    {
-        name: "MS Level",
-        numeric: true,
-        getter: (spectrum: Spectrum) => spectrum.msLevel,
-    },
-    {
-        name: "Prec. m/z",
-        numeric: true,
-        format: (x: number) => x.toFixed(3),
-        getter: (spectrum: Spectrum) =>
-            spectrum.precursor ? spectrum.precursor.ions[0].mz : null,
-    },
-    {
-        name: "Prec. z",
-        numeric: true,
-        getter: (spectrum: Spectrum) =>
-            spectrum.precursor ? spectrum.precursor.ions[0].charge : null,
-    },
+  },
 ];
 
 function fixedHeaderContent() {
@@ -148,7 +163,7 @@ function rowContent(_index: number, row: Spectrum, currentSpectrumID: string | u
                 value = column.format(value);
             }
             return (
-                <TableCell key={column.name} align={"center"} className={isCurrentSpectrum ? "current-spectrum" : ""}>
+                <TableCell key={column.name} align={"center"} className={[isCurrentSpectrum ? "current-spectrum" : "", column.class ? column.class : ""].join(" ")}>
                 {value}
                 </TableCell>
             );

@@ -5,3 +5,7 @@ tbody  :hover {
 td.current-spectrum {
     background-color: rgb(76, 252, 170);
 }
+
+td.native-id-column {
+    font-size: 0.8em;
+}

@@ -15,6 +15,7 @@ import {
   ViewerActionType,
 } from "./util";
 import { IsotopicModel } from "mzdata";
+import * as mzdata from 'mzdata';
 
 interface IsotopicModelOption {
   model: IsotopicModel;
@@ -174,6 +175,75 @@ export function ProcessingConfiguration() {
             );
           }}
         />
+      </ListItem>
+      <ListItem>
+        <FormControl sx={{ m: 1 }}>
+          <InputLabel htmlFor="feature-extraction-size">
+            Feature Minimum Size
+          </InputLabel>
+          <Input
+            id="feature-extraction-size"
+            type="number"
+            value={processingParams.minimumFeatureExtractionSize}
+            aria-valuemin={0}
+            onChange={(event) => {
+              let newValue = parseFloat(event.target.value);
+              if (isNaN(newValue)) {
+                return;
+              }
+              if (newValue != processingParams.minimumFeatureExtractionSize) {
+                const nextParams = processingParams.copy();
+                nextParams.minimumFeatureExtractionSize = newValue;
+                setProcessingParams(nextParams);
+              }
+            }}
+          />
+        </FormControl>
+      </ListItem>
+      <ListItem>
+        <FormControl sx={{ m: 1 }}>
+          <InputLabel htmlFor="feature-extraction-gap-size">
+            Feature Gap Size
+          </InputLabel>
+          <Input
+            id="feature-extraction-gap-size"
+            type="number"
+            value={processingParams.maximumFeatureGapSize}
+            aria-valuemin={0}
+            onChange={(event) => {
+              let newValue = parseFloat(event.target.value);
+              if (isNaN(newValue)) {
+                return;
+              }
+              if (newValue != processingParams.maximumFeatureGapSize) {
+                const nextParams = processingParams.copy();
+                nextParams.maximumFeatureGapSize = newValue;
+                setProcessingParams(nextParams);
+              }
+            }}
+          />
+        </FormControl>
+      </ListItem>
+      <ListItem>
+        <FormControl sx={{ m: 1 }}>
+          <InputLabel htmlFor="mass-error-tolerance">
+            Mass Error Tolerance
+          </InputLabel>
+          <Input
+            id="mass-error-tolerance"
+            type="text"
+            value={processingParams.massErrorTolerance}
+            aria-valuemin={0}
+            onChange={(event) => {
+              let newValue = mzdata.Tolerance.parse(event.target.value);
+              if (newValue != processingParams.massErrorTolerance) {
+                const nextParams = processingParams.copy();
+                nextParams.massErrorTolerance = newValue;
+                setProcessingParams(nextParams);
+              }
+            }}
+          />
+        </FormControl>
       </ListItem>
     </List>
   );

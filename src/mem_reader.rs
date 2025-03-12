@@ -4,10 +4,10 @@ use std::sync::Arc;
 use js_sys::{Array, Object, Reflect};
 use mzdata::spectrum::utils::HasIonMobility;
 use mzdeisotope::DeconvolvedSolutionPeak;
-use mzpeaks::feature::{ChargedFeature, Feature};
-use mzpeaks::{CentroidPeak, IonMobility, Mass, MZ};
+use mzdeisotope_map::solution::DeconvolvedSolutionFeature;
+use mzpeaks::feature::Feature;
+use mzpeaks::{CentroidPeak, IonMobility, MZ};
 use wasm_bindgen::prelude::*;
-
 
 use mzdata::io::{IMMZReaderType, MZReaderType};
 use mzdata::prelude::*;
@@ -17,7 +17,7 @@ use crate::binds::{WebIonMobilityFrame, WebSpectrum};
 
 #[derive(Debug)]
 pub struct SharedBuffer {
-    buffer: Arc<Vec<u8>>
+    buffer: Arc<Vec<u8>>,
 }
 
 impl SharedBuffer {
@@ -28,7 +28,9 @@ impl SharedBuffer {
 
 impl Clone for SharedBuffer {
     fn clone(&self) -> Self {
-        Self { buffer: self.buffer.clone() }
+        Self {
+            buffer: self.buffer.clone(),
+        }
     }
 }
 
@@ -38,15 +40,13 @@ impl AsRef<[u8]> for SharedBuffer {
     }
 }
 
-
 type BufferType = SharedBuffer;
-
 
 type ReaderType = MZReaderType<io::Cursor<BufferType>, CentroidPeak, DeconvolvedSolutionPeak>;
 type IMReaderType = IMMZReaderType<
     io::Cursor<BufferType>,
     Feature<MZ, IonMobility>,
-    ChargedFeature<Mass, IonMobility>,
+    DeconvolvedSolutionFeature<IonMobility>,
     CentroidPeak,
     DeconvolvedSolutionPeak,
 >;
@@ -84,7 +84,7 @@ impl MemWebMZReader {
         Self {
             handle: MZReaderType::open_read_seek(io::Cursor::new(buf.clone())).unwrap(),
             peak_picking: false,
-            buffer_handle: Some(buf)
+            buffer_handle: Some(buf),
         }
     }
 
@@ -187,18 +187,19 @@ impl MemWebMZReader {
         if let Some(im) = self.handle.has_ion_mobility() {
             if matches!(im, HasIonMobility::Dimension) {
                 let buffer = self.buffer().ok_or("No shared buffer found")?.clone();
-                let reader = ReaderType::open_read_seek(io::Cursor::new(buffer)).map_err(|e| "Failed to reuse shared buffer".to_string())?;
+                let reader = ReaderType::open_read_seek(io::Cursor::new(buffer))
+                    .map_err(|e| format!("Failed to reuse shared buffer: {e}"))?;
                 let handle = reader.into_frame_source();
                 let this = MemWebIMMZReader {
                     handle,
                     feature_extraction: self.peak_picking,
                 };
-                return Ok(this)
+                return Ok(this);
             } else {
-                return Err("No ion mobility data found".to_string())
+                return Err("No ion mobility data found".to_string());
             }
         }
-        return Err("No ion mobility data found".to_string())
+        return Err("No ion mobility data found".to_string());
     }
 }
 
@@ -254,7 +255,13 @@ impl MemWebIMMZReader {
         self.handle.len()
     }
 
-    fn convert_frame(&self, mut frame: MultiLayerIonMobilityFrame) -> WebIonMobilityFrame {
+    fn convert_frame(
+        &self,
+        mut frame: MultiLayerIonMobilityFrame<
+            Feature<MZ, IonMobility>,
+            DeconvolvedSolutionFeature<IonMobility>,
+        >,
+    ) -> WebIonMobilityFrame {
         if self.feature_extraction && frame.features.is_none() {
             frame
                 .extract_features_simple(Tolerance::PPM(15.0), 2, 0.1, None)
