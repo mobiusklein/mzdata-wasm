@@ -97,9 +97,7 @@ impl WebTolerance {
     }
 
     pub fn parse(text: &str) -> Result<Self, JsError> {
-        let tol = text.parse().map_err(|e| {
-            JsError::new(&format!("{e}"))
-        })?;
+        let tol = text.parse().map_err(|e| JsError::new(&format!("{e}")))?;
 
         Ok(WebTolerance(tol))
     }
@@ -109,14 +107,14 @@ impl WebTolerance {
         self.0.to_string()
     }
 
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.0).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.0).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(val: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(val).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self(inner))
     }
 
@@ -253,16 +251,15 @@ impl WebParam {
     }
 
     #[wasm_bindgen(js_name = "toJSON")]
-    pub fn to_json(&self) -> Result<Object, JsValue> {
-        let entries = Array::of4(
-            &Array::of2(&JsValue::from_str("name"), &self.name().into()),
-            &Array::of2(&JsValue::from_str("value"), &self.value()),
-            &Array::of2(&JsValue::from_str("id"), &self.id().into()),
-            &Array::of2(&JsValue::from_str("unit"), &self.unit().into()),
-        );
-        Object::from_entries(&entries)
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.0).map_err(|e| JsError::new(&e.to_string()))
     }
 
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(val: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(val).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self(inner))
+    }
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self) -> String {
         format!(
@@ -536,17 +533,16 @@ impl WebIsotopicModel {
         *self
     }
 
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.0).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.0).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(val: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(val).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self(inner))
     }
-
 }
 
 impl From<SignalContinuity> for WebSignalContinuity {
@@ -640,16 +636,25 @@ impl WebSpectrum {
 
 #[wasm_bindgen(js_class = "Spectrum")]
 impl WebSpectrum {
-
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.inner).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.inner).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(val: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(val).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self { inner })
+    }
+
+    #[wasm_bindgen(js_name = "fromBatchJSON")]
+    pub fn batch_from_json(text: String) -> Result<Vec<Self>, JsError> {
+        let inner = serde_json::from_str::<Vec<_>>(&text)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .into_iter()
+            .map(|inner| Self { inner })
+            .collect();
+        Ok(inner)
     }
 
     #[wasm_bindgen(getter)]
@@ -951,18 +956,16 @@ impl From<SimpleFeature<MZ, IonMobility>> for WebFeature {
 
 #[wasm_bindgen(js_class = "Feature")]
 impl WebFeature {
-
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.0).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.0).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(text: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(text).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self(inner))
     }
-
     #[wasm_bindgen(constructor)]
     pub fn new(x: Vec<f64>, y: Vec<f64>, z: Vec<f32>) -> Self {
         Self(Feature::new(x, y, z))
@@ -1051,14 +1054,14 @@ impl WebDeconvolvedFeature {
         Self(self.0.clone())
     }
 
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.0).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.0).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(text: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(text).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self(inner))
     }
 
@@ -1256,15 +1259,25 @@ impl WebIonMobilityFrame {
         self.description().id.clone()
     }
 
-    #[wasm_bindgen(js_name="toJSON")]
-    pub fn to_json(&self) -> Result<String, JsError> {
-        serde_json::to_string(&self.inner).map_err(|e| JsError::new(&e.to_string()))
+    #[wasm_bindgen(js_name = "toJSON")]
+    pub fn to_json(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(&self.inner).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    #[wasm_bindgen(js_name="fromJSON")]
-    pub fn from_json(text: String) -> Result<Self, JsError> {
-        let inner = serde_json::from_str(&text).map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = "fromJSON")]
+    pub fn from_json(val: JsValue) -> Result<Self, JsError> {
+        let inner = serde_wasm_bindgen::from_value(val).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self { inner })
+    }
+
+    #[wasm_bindgen(js_name = "fromBatchJSON")]
+    pub fn batch_from_json(text: String) -> Result<Vec<Self>, JsError> {
+        let inner = serde_json::from_str::<Vec<_>>(&text)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .into_iter()
+            .map(|inner| Self { inner })
+            .collect();
+        Ok(inner)
     }
 
     #[wasm_bindgen(getter, js_name = "startTime")]
@@ -1364,9 +1377,7 @@ impl WebIonMobilityFrame {
         maximum_gap_size: f64,
         error_tolerance: Option<WebTolerance>,
     ) {
-        let error_tolerance = error_tolerance
-            .map(|e| e.0)
-            .unwrap_or(Tolerance::PPM(15.0));
+        let error_tolerance = error_tolerance.map(|e| e.0).unwrap_or(Tolerance::PPM(15.0));
         self.inner
             .extract_features_simple(error_tolerance, min_length, maximum_gap_size, None)
             .unwrap();
@@ -1401,9 +1412,7 @@ impl WebIonMobilityFrame {
             self.extract_features(min_length, maximum_gap_size, error_tolerance);
         }
 
-        let error_tolerance = error_tolerance
-            .map(|e| e.0)
-            .unwrap_or(Tolerance::PPM(15.0));
+        let error_tolerance = error_tolerance.map(|e| e.0).unwrap_or(Tolerance::PPM(15.0));
 
         let mut features = self.inner.features.as_ref().unwrap().clone();
         features.iter_mut().for_each(|f| {

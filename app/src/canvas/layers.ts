@@ -8,7 +8,6 @@ import {
 } from "./canvas";
 import { IsolationWindow } from "../../../pkg/mzdata_wasm";
 import * as mzdata from "mzdata";
-import { range } from "lodash";
 
 const defaultColor = "steelblue";
 
@@ -2382,10 +2381,10 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   slice(begin: number, end: number): FeatureProfileLayerBase {
     return new FeatureProfileLineLayerCollection(
       this.layers
-        .filter((x) => {
+        .filter((_) => {
           if (this.canvas && this.canvas.sourceCanvas) {
-            const [start, end] =
-              this.canvas.sourceCanvas.extentCoordinateInterval;
+            // const [start, end] =
+            //   this.canvas.sourceCanvas.extentCoordinateInterval;
             // return start <= x.featureMz() && end >= x.featureMz();
             return true;
           } else {
@@ -2400,10 +2399,10 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   between(beginX: number, endX: number) {
     return new FeatureProfileLineLayerCollection(
       this.layers
-        .filter((x) => {
+        .filter((_) => {
           if (this.canvas && this.canvas.sourceCanvas) {
-            const [start, end] =
-              this.canvas.sourceCanvas.extentCoordinateInterval;
+            // const [start, end] =
+            //   this.canvas.sourceCanvas.extentCoordinateInterval;
             // return start <= x.featureMz() && end >= x.featureMz()
             return true;
           } else {
@@ -2444,10 +2443,10 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   initArtist(canvas: FeatureProfileCanvas) {
     if (!canvas.container) return;
     this.layers
-      .filter((x) => {
+      .filter((_) => {
         if (this.canvas && this.canvas.sourceCanvas) {
-          const [start, end] =
-            this.canvas.sourceCanvas.extentCoordinateInterval;
+          // const [start, end] =
+          //   this.canvas.sourceCanvas.extentCoordinateInterval;
           // return start <= x.featureMz() && end >= x.featureMz();
           return true;
         } else {

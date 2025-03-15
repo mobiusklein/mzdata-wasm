@@ -17,7 +17,7 @@ import {
 import { IsotopicModel } from "mzdata";
 import * as mzdata from 'mzdata';
 
-interface IsotopicModelOption {
+export interface IsotopicModelOption {
   model: IsotopicModel;
   displayName: string;
 }
@@ -28,7 +28,7 @@ const MODELS = [
   IsotopicModel.glycan(),
 ];
 
-const ISOTOPIC_MODELS: IsotopicModelOption[] = MODELS.map((i) => {
+export const ISOTOPIC_MODELS: IsotopicModelOption[] = MODELS.map((i) => {
   return {
     model: i,
     displayName: i.name,

@@ -16,53 +16,55 @@ import { TableVirtuoso, TableComponents } from "react-virtuoso";
 import { useSpectrumViewerDispatch, useSpectrumViewer, ViewerActionType } from './util';
 
 
-interface RowContext {
-    clickHandler: Function
+export interface RowContext {
+  clickHandler: Function;
 }
 
-const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
-    Scroller: forwardRef<HTMLDivElement>((props, ref) => (
-        <TableContainer component={Paper} {...props} ref={ref} />
-    )),
-    Table: (props) => (
-        <Table
+export const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
+  Scroller: forwardRef<HTMLDivElement>((props, ref) => (
+    <TableContainer component={Paper} {...props} ref={ref} />
+  )),
+  Table: (props) => (
+    <Table
+      {...props}
+      size={"small"}
+      sx={{
+        borderCollapse: "separate",
+        tableLayout: "fixed",
+        minWidth: "100%",
+      }}
+    />
+  ),
+  TableHead: forwardRef<HTMLTableSectionElement>((props, ref) => (
+    <TableHead {...props} ref={ref} />
+  )),
+  TableRow: (props) => {
+    const clickHandler = props.context?.clickHandler;
+    const row = (
+      <TableRow
         {...props}
-        size={"small"}
-        sx={{
-            borderCollapse: "separate",
-            tableLayout: "fixed",
-            minWidth: "100%",
-        }}
-        />
-    ),
-    TableHead: forwardRef<HTMLTableSectionElement>((props, ref) => (
-        <TableHead {...props} ref={ref} />
-    )),
-    TableRow: (props) => {
-        const clickHandler = props.context?.clickHandler;
-        const row = (
-            <TableRow
-            {...props}
-            onClick={(_) => clickHandler ? clickHandler(props["data-index"]) : undefined}
-            />
-        );
-        return row;
-    },
-    TableBody: forwardRef<HTMLTableSectionElement>((props, ref) => (
-        <TableBody {...props} ref={ref} />
-    )),
+        onClick={(_) =>
+          clickHandler ? clickHandler(props["data-index"]) : undefined
+        }
+      />
+    );
+    return row;
+  },
+  TableBody: forwardRef<HTMLTableSectionElement>((props, ref) => (
+    <TableBody {...props} ref={ref} />
+  )),
 };
 
-interface Column {
-    name: string;
-    format?: Function | undefined;
-    numeric: boolean;
-    width?: number | undefined;
-    getter: Function;
-    class?: string | undefined
+export interface Column {
+  name: string;
+  format?: Function | undefined;
+  numeric: boolean;
+  width?: number | undefined;
+  getter: Function;
+  class?: string | undefined;
 }
 
-const columnDefs: Column[] = [
+export const columnDefs: Column[] = [
   {
     name: "Index",
     numeric: true,
@@ -129,7 +131,7 @@ const columnDefs: Column[] = [
   },
 ];
 
-function fixedHeaderContent() {
+export function fixedHeaderContent() {
     return (
         <TableRow>
         {columnDefs.map((column) => {
@@ -153,23 +155,34 @@ function fixedHeaderContent() {
     );
 }
 
-function rowContent(_index: number, row: Spectrum, currentSpectrumID: string | undefined) {
-    const isCurrentSpectrum = row.id == currentSpectrumID
-    return (
-        <Fragment>
-        {columnDefs.map((column) => {
-            let value = column.getter(row);
-            if (column.format && value !== undefined && value !== null) {
-                value = column.format(value);
-            }
-            return (
-                <TableCell key={column.name} align={"center"} className={[isCurrentSpectrum ? "current-spectrum" : "", column.class ? column.class : ""].join(" ")}>
-                {value}
-                </TableCell>
-            );
-        })}
-        </Fragment>
-    );
+export function rowContent(
+  _index: number,
+  row: Spectrum,
+  currentSpectrumID: string | undefined
+) {
+  const isCurrentSpectrum = row.id == currentSpectrumID;
+  return (
+    <Fragment>
+      {columnDefs.map((column) => {
+        let value = column.getter(row);
+        if (column.format && value !== undefined && value !== null) {
+          value = column.format(value);
+        }
+        return (
+          <TableCell
+            key={column.name}
+            align={"center"}
+            className={[
+              isCurrentSpectrum ? "current-spectrum" : "",
+              column.class ? column.class : "",
+            ].join(" ")}
+          >
+            {value}
+          </TableCell>
+        );
+      })}
+    </Fragment>
+  );
 }
 
 export function VirtualizedTable() {
