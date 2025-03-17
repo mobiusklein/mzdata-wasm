@@ -332,17 +332,7 @@ export class MSCanvasBase<T extends PointLike> {
       .attr("x", 0)
       .attr("y", 0);
 
-    this.brush = d3
-      .brushX<any>()
-      .extent([
-        [0, 0],
-        [this.width, this.height],
-      ])
-      // throttle this call to avoid one call to updateChart per layer
-      .on(
-        "end",
-        _.throttle(() => this.updateChart(), 200, { trailing: false })
-      );
+    this.defineZoom()
 
     this.container.on("dblclick", () => {
       this.resetZoom();
@@ -374,6 +364,20 @@ export class MSCanvasBase<T extends PointLike> {
 
     this.createMouseLabel()
     this.configureMouseLabel();
+  }
+
+  defineZoom() {
+    this.brush = d3
+      .brushX<any>()
+      .extent([
+        [0, 0],
+        [this.width, this.height],
+      ])
+      // throttle this call to avoid one call to updateChart per layer
+      .on(
+        "end",
+        _.throttle(() => this.updateChart(), 200, { trailing: false })
+      );
   }
 
   createMouseLabel() {
@@ -580,6 +584,50 @@ export class FeatureMapCanvas extends MSCanvasBase<FeatureCanvasPoint> {
     this.updateCoordinateInterval();
   }
 
+  defineZoom() {
+    this.brush = d3
+      .brush<any>()
+      .extent([
+        [0, 0],
+        [this.width, this.height],
+      ])
+      // throttle this call to avoid one call to updateChart per layer
+      .on(
+        "end",
+        _.throttle(() => this.updateChart(), 200, { trailing: false })
+      );
+  }
+
+  updateChart() {
+    let extent = d3.event.selection;
+    console.log(extent)
+    if (!extent) {
+      if (!this.idledTimeout) {
+        this.idledTimeout = setTimeout(() => this._idled(), 5000);
+        return this.idledTimeout;
+      }
+      this.setExtentByCoordinate(this.minCoordinate(), this.maxCoordinate());
+    } else {
+      if (!this.xScale || !this.yScale) throw new Error("Uninitialized scales");
+      const minCoordinate = this.xScale.invert(extent[0][0]);
+      const maxCoordinate = this.xScale.invert(extent[1][0]);
+
+      const minIMCoordinate = this.yScale.invert(extent[1][1])
+      const maxIMCoordinate = this.yScale.invert(extent[0][1])
+
+      console.log(minCoordinate, maxCoordinate)
+      console.log(minIMCoordinate, maxIMCoordinate)
+
+      this.setExtentByCoordinate(
+        minCoordinate,
+        maxCoordinate,
+        undefined,
+        minIMCoordinate,
+        maxIMCoordinate
+      );
+    }
+  }
+
   minYDim() {
     if (this.layers.length === 0) {
       return 0;
@@ -622,7 +670,9 @@ export class FeatureMapCanvas extends MSCanvasBase<FeatureCanvasPoint> {
   setExtentByCoordinate(
     minCoordinate: number | undefined,
     maxCoordinate: number | undefined,
-    animateDuration?: number | undefined
+    animateDuration?: number | undefined,
+    minIMArg?: number | undefined,
+    maxIMArg?: number | undefined,
   ) {
     if (minCoordinate === undefined) {
       minCoordinate = this.minCoordinate();
@@ -635,18 +685,18 @@ export class FeatureMapCanvas extends MSCanvasBase<FeatureCanvasPoint> {
     }
 
     if (!this.xScale || !this.yScale) throw new Error("Uninitialized scales");
-    const maxIntensity = Math.min(
+    const maxIM = maxIMArg !== undefined ? maxIMArg : Math.min(
       this.maxYDimBetween(minCoordinate, maxCoordinate) + 100.0,
       this.maxYDim()
     );
 
-    let minIntensity = this.minYDimBetween(minCoordinate, maxCoordinate);
-    if (minIntensity == 0) {
-      minIntensity = this.minYDim();
+    let minIM = minIMArg !== undefined ? minIMArg : this.minYDimBetween(minCoordinate, maxCoordinate);
+    if (minIM == 0) {
+      minIM = this.minYDim();
     }
     this.extentCoordinateInterval = [minCoordinate, maxCoordinate];
     this.xScale.domain([minCoordinate, maxCoordinate]);
-    this.yScale.domain([minIntensity * 0.95, maxIntensity * 1.05]);
+    this.yScale.domain([minIM * 0.95, maxIM * 1.05]);
     this.xAxis
       ?.transition()
       .duration(animateDuration)

@@ -7,7 +7,7 @@ use bytes::BytesMut;
 use futures::Stream;
 use js_sys::{Reflect, Uint8Array};
 use log::info;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead};
+use tokio::io::{AsyncBufReadExt, AsyncRead};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 

@@ -1270,6 +1270,11 @@ impl WebIonMobilityFrame {
         Ok(Self { inner })
     }
 
+    pub fn unpack(val: &[u8]) -> Result<Self, JsError> {
+        let inner = rmp_serde::from_slice(val).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
     #[wasm_bindgen(js_name = "fromBatchJSON")]
     pub fn batch_from_json(text: String) -> Result<Vec<Self>, JsError> {
         let inner = serde_json::from_str::<Vec<_>>(&text)
