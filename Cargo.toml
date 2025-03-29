@@ -31,7 +31,7 @@ web-sys = { version = "0.3.76", features = [
     "ReadableStream",
 ] }
 
-mzdata = { version = "0.49.0", default-features = false, features = [
+mzdata = { version = "0.51.0", default-features = false, features = [
     "mzml",
     "mgf",
     "mzsignal",
@@ -41,11 +41,11 @@ mzdata = { version = "0.49.0", default-features = false, features = [
 
 flate2 = "1.0.35"
 
-mzpeaks = "1"
-chemical_elements = "0.6.0"
-mzdeisotope = { version = "0.2.7", features = ["serde"]}
-mzdeisotope-map = { version = "0.2.7", features = ["serde"]}
-mzsignal = { version = ">=1.1.2", default-features = false, features = ["nalgebra", "serde"]}
+mzpeaks = { workspace = true }
+chemical_elements = { workspace = true }
+mzdeisotope = { workspace = true }
+mzdeisotope-map = { workspace = true }
+mzsignal = { workspace = true }
 
 wasm-logger = "0.2.0"
 tracing-wasm = "0.2.1"
@@ -74,4 +74,42 @@ opt-level = 3
 debug = true
 
 [patch.crates-io]
-mzdata = { path = "../mzdata" }
+
+[workspace]
+
+resolver = "2"
+members = [".", "./desktop/mzdata-viewer/src-tauri/"]
+
+[workspace.dependencies]
+mzpeaks = "1"
+chemical_elements = "0.6.0"
+mzdeisotope = { version = "0.3.1", features = ["serde"]}
+mzdeisotope-map = { version = "0.3.1", features = ["serde"]}
+mzsignal = { version = ">=1.1.2", default-features = false, features = ["nalgebra", "serde"]}
+
+
+
+[profile.release.package."mzsignal"]
+opt-level = 3
+
+[profile.release.package."chemical_elements"]
+opt-level = 3
+
+[profile.release.package."mzdeisotope"]
+opt-level = 3
+
+[profile.release.package."mzdeisotope-map"]
+opt-level = 3
+
+[profile.dev.package."mzsignal"]
+opt-level = 3
+
+[profile.dev.package."chemical_elements"]
+opt-level = 3
+
+[profile.dev.package."mzdeisotope"]
+opt-level = 3
+
+[profile.dev.package."mzdeisotope-map"]
+opt-level = 3
+

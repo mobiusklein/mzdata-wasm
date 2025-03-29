@@ -7,7 +7,7 @@ use bytes::BytesMut;
 use futures::Stream;
 use js_sys::{Reflect, Uint8Array};
 use log::info;
-use tokio::io::{AsyncBufReadExt, AsyncRead};
+use tokio::io::AsyncRead;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -162,6 +162,7 @@ impl AsyncRead for WebReaderAsyncRead {
         let inner = me.inner.get_mut();
         match io::Read::read(&mut inner.buffer, &mut dst.initialize_unfilled()) {
             Ok(z) => {
+                info!("Wrote {z} bytes from buffer and inner stream is done? {}", inner.stream_done);
                 if z > 0 {
                     return std::task::Poll::Ready(Ok(()))
                 } else if inner.stream_done {
@@ -169,10 +170,12 @@ impl AsyncRead for WebReaderAsyncRead {
                 }
             },
             Err(e) => {
+                tracing::error!("Buffer read error: {e}");
                 return std::task::Poll::Ready(Err(e))
             }
         }
         if inner.stream_done {
+            info!("Stream is done after buffer check, we're done!");
             return std::task::Poll::Ready(Ok(()))
         }
         loop {
@@ -189,14 +192,17 @@ impl AsyncRead for WebReaderAsyncRead {
                     }
 
                     if !inner.stream_done {
+                        info!("scheduling next stream read");
                         let f = JsFuture::from(me.stream_reader.read());
                         inner.state = Some(State::Busy(f, buf));
                     } else {
+                        info!("Inner state is complete");
                         inner.state = Some(State::Complete);
                     }
 
                     match io::Read::read(&mut inner.buffer, &mut dst.initialize_unfilled()) {
                         Ok(z) => {
+                            info!("Idle: Wrote {z} bytes from buffer and inner stream is done? {}", inner.stream_done);
                             if z > 0 {
                                 return std::task::Poll::Ready(Ok(()))
                             } else if inner.stream_done {
@@ -204,6 +210,7 @@ impl AsyncRead for WebReaderAsyncRead {
                             }
                         },
                         Err(e) => {
+                            tracing::error!("Idle: Read buffer with error: {e}");
                             return std::task::Poll::Ready(Err(e))
                         }
                     }
@@ -228,7 +235,7 @@ impl AsyncRead for WebReaderAsyncRead {
                                         log::info!("Received chunk, {}", value_buf.len());
                                         buf.extend_from_slice(&value_buf);
                                         inner.state = Some(State::Idle(Some(buf)));
-                                        inner.stream_done = true;
+                                        inner.stream_done = done;
                                     }
                                 },
                                 Err(err) => {
@@ -257,11 +264,9 @@ impl AsyncRead for WebReaderAsyncRead {
 
 
 #[wasm_bindgen]
-pub async fn test_reader(stream_reader: ReadableStreamDefaultReader) {
-    let handle = tokio::io::BufReader::new(WebReaderAsyncRead::new(stream_reader));
-    let mut lines = handle.lines();
-
-    while let Some(line) = lines.next_line().await.unwrap() {
-        log::info!("{line}");
-    }
+pub async fn test_reader(stream_reader: ReadableStreamDefaultReader) -> String {
+    let mut handle = WebReaderAsyncRead::new(stream_reader);
+    let mut buf = String::new();
+    handle.read_to_string(&mut buf).await.unwrap();
+    buf
 }

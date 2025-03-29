@@ -6,7 +6,6 @@ import {
   SpectrumCanvas,
   MSCanvasBase,
 } from "./canvas";
-import { IsolationWindow } from "../../../pkg/mzdata_wasm";
 import * as mzdata from "mzdata";
 
 const defaultColor = "steelblue";
@@ -1187,10 +1186,14 @@ export class PrecursorPeakLayer extends AbstractPointLayer<ChargedPoint> {
 }
 
 export class IsolationWindowLayer extends AbstractPointLayer<MZPoint> {
-  windows: IsolationWindow[];
+  windows: mzdata.wasm.IsolationWindow[];
   height: number;
 
-  constructor(windows: IsolationWindow[], height: number, metadata: any) {
+  constructor(
+    windows: mzdata.wasm.IsolationWindow[],
+    height: number,
+    metadata: any
+  ) {
     super(IsolationWindowLayer._splitWindows(windows, height), metadata);
     this.windows = windows;
     this.height = height;
@@ -1208,7 +1211,7 @@ export class IsolationWindowLayer extends AbstractPointLayer<MZPoint> {
     return;
   }
 
-  static _splitWindows(windows: IsolationWindow[], height: number) {
+  static _splitWindows(windows: mzdata.wasm.IsolationWindow[], height: number) {
     let points = [];
     for (let window of windows) {
       points.push(new MZPoint(window.lowerBound, height));
@@ -2381,16 +2384,6 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   slice(begin: number, end: number): FeatureProfileLayerBase {
     return new FeatureProfileLineLayerCollection(
       this.layers
-        .filter((_) => {
-          if (this.canvas && this.canvas.sourceCanvas) {
-            // const [start, end] =
-            //   this.canvas.sourceCanvas.extentCoordinateInterval;
-            // return start <= x.featureMz() && end >= x.featureMz();
-            return true;
-          } else {
-            return true;
-          }
-        })
         .map((x) => x.slice(begin, end)),
       this.metadata
     );
@@ -2399,16 +2392,6 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   between(beginX: number, endX: number) {
     return new FeatureProfileLineLayerCollection(
       this.layers
-        .filter((_) => {
-          if (this.canvas && this.canvas.sourceCanvas) {
-            // const [start, end] =
-            //   this.canvas.sourceCanvas.extentCoordinateInterval;
-            // return start <= x.featureMz() && end >= x.featureMz()
-            return true;
-          } else {
-            return true;
-          }
-        })
         .map((x) => x.between(beginX, endX)),
       this.metadata
     );
@@ -2421,19 +2404,8 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
 
   redraw(canvas: FeatureProfileCanvas) {
     this.layers.forEach((x) => {
-      if (this.canvas && this.canvas.sourceCanvas) {
-        // const [start, end] =
-        //   this.canvas.sourceCanvas.extentCoordinateInterval;
-        // if (start <= x.featureMz() && end >= x.featureMz()) {
-        //   x.redraw(canvas)
-        // } else {
-        //   x.remove()
-        // }
-        x.redraw(canvas);
-      } else {
-        x.redraw(canvas);
-      }
-    });
+              x.redraw(canvas);
+          });
   }
 
   remove() {
@@ -2443,16 +2415,6 @@ export class FeatureProfileLineLayerCollection extends FeatureProfileLayerBase {
   initArtist(canvas: FeatureProfileCanvas) {
     if (!canvas.container) return;
     this.layers
-      .filter((_) => {
-        if (this.canvas && this.canvas.sourceCanvas) {
-          // const [start, end] =
-          //   this.canvas.sourceCanvas.extentCoordinateInterval;
-          // return start <= x.featureMz() && end >= x.featureMz();
-          return true;
-        } else {
-          return true;
-        }
-      })
       .forEach((x) => x.initArtist(canvas));
   }
 
