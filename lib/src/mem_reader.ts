@@ -6,11 +6,57 @@ export type SpectrumGroup = {
     products: Spectrum[]
 }
 
+
+const readFileToBuffer = async (file: File) => {
+  let buffer: Uint8Array = new Uint8Array();
+  if (file.name.endsWith(".gz")) {
+    console.log(`Decompressing ${file.name}`);
+    const readerHandle = file
+      .stream()
+      .pipeThrough(new DecompressionStream("gzip"))
+      .getReader();
+    const chunks = [];
+    let totalSize = 0;
+    while (true) {
+      let { value, done } = await readerHandle.read();
+      if (done) break;
+      if (value) {
+        totalSize += value.length;
+        chunks.push(value);
+      }
+    }
+    buffer = new Uint8Array(totalSize);
+    let offset = 0;
+    for (let chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+  } else {
+    buffer = new Uint8Array(await file.arrayBuffer());
+  }
+  return buffer
+}
+
+export class IMMZReader {
+  reader: wasm.MemWebIMMZReader;
+
+  static async open(file: File) {
+    const buffer = await readFileToBuffer(file);
+    const reader = wasm.MemWebMZReader.from_buffer(buffer);
+    const im_reader = reader.to_frame_reader()
+    return new IMMZReader(im_reader);
+  }
+
+  private constructor(reader: wasm.MemWebIMMZReader) {
+    this.reader = reader;
+  }
+}
+
 export class MZReader {
   reader: wasm.MemWebMZReader;
 
   static async open(file: File) {
-    const buffer = new Uint8Array(await file.arrayBuffer());
+    const buffer = await readFileToBuffer(file);
     const reader = wasm.MemWebMZReader.from_buffer(buffer);
     return new MZReader(reader);
   }

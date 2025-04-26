@@ -3,15 +3,16 @@ use wasm_bindgen::prelude::*;
 use wasm_logger;
 
 mod binds;
-mod utils;
 mod mem_reader;
 mod mem_writer;
+mod utils;
 // mod webio;
 // mod worker_reader;
-// mod asyncio;
+pub mod asyncio;
 
+pub use asyncio::{test_reader, WebReaderAsyncRead};
 pub use binds::*;
-pub use mem_reader::MemWebMZReader as WebMZReader;
+pub use mem_reader::{MemWebIMMZReader as WebIMMZReader, MemWebMZReader as WebMZReader};
 
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the
@@ -20,15 +21,18 @@ pub fn set_panic_hook() {
     //
     // For more details see
     // https://github.com/rustwasm/console_error_panic_hook#readme
-    #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
 }
 
-
 #[wasm_bindgen(start)]
 fn start() {
-    wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
     set_panic_hook();
+
+    let config = tracing_wasm::WASMLayerConfigBuilder::default()
+        .set_max_level(tracing::Level::DEBUG)
+        .build();
+    tracing_wasm::set_as_global_default_with_config(config);
+    wasm_logger::init(wasm_logger::Config::new(log::Level::Debug));
 }
 
 /*

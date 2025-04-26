@@ -1,6 +1,9 @@
 wasm:
     wasm-pack build --target bundler
 
+wasm-dev:
+    wasm-pack build --dev --target bundler
+
 lib:
     cd lib && npm install . && npm run build
 
@@ -9,4 +12,4 @@ dev:
 
 app:
     cd app && npm run build
-    cp app/dist/index.html mzdata-viewer.html
+    cp app/dist/app/index.html mzdata-viewer.html

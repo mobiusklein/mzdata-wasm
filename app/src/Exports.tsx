@@ -1,4 +1,4 @@
-import { writeMGF, writeMzML } from "mzdata";
+import { Spectrum, writeMGF, writeMzML } from "mzdata";
 import { SpectrumViewerState, useSpectrumViewer } from "./util";
 import Button from "@mui/material/Button";
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
@@ -6,6 +6,7 @@ import SaveAltIcon from '@mui/icons-material/SaveAlt';
 
 async function saveToMGF(state: SpectrumViewerState) {
     if (state.spectrumData) {
+      if (state.spectrumData.spectrum instanceof Spectrum) {
         const buffer = writeMGF([state.spectrumData.spectrum]);
         const dialog = globalThis.showSaveFilePicker({
             id: "mzdata-viewer",
@@ -16,21 +17,24 @@ async function saveToMGF(state: SpectrumViewerState) {
           await stream.write(buffer)
           await stream.close()
         });
+      }
     }
 }
 
 async function saveToMzML(state: SpectrumViewerState) {
     if (state.spectrumData && state.mzReader) {
-      const buffer = writeMzML([state.spectrumData.spectrum], state.mzReader);
-      const dialog = globalThis.showSaveFilePicker({
-        id: "mzdata-viewer",
-        suggestedName: "spectrum.mzML",
-      });
-      dialog.then(async (handle) => {
-        const stream = await handle.createWritable();
-        await stream.write(buffer);
-        await stream.close();
-      });
+      if (state.spectrumData.spectrum instanceof Spectrum) {
+        const buffer = writeMzML([state.spectrumData.spectrum], state.mzReader);
+        const dialog = globalThis.showSaveFilePicker({
+          id: "mzdata-viewer",
+          suggestedName: "spectrum.mzML",
+        });
+        dialog.then(async (handle) => {
+          const stream = await handle.createWritable();
+          await stream.write(buffer);
+          await stream.close();
+        });
+      }
     }
 }
 

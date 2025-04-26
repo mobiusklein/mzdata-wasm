@@ -9,3 +9,7 @@ text.envelope-label, text.cursor-label, text.peak-label, text.precursor-label {
 .tick text, .axis-label {
     user-select: none;
 }
+
+.spectrum-canvas svg {
+    margin-bottom: 1em;
+}

@@ -1,12 +1,17 @@
+use std::future::Future;
+use std::io::{Cursor, self};
+use std::task::Poll;
 use std::pin::Pin;
 
+use bytes::BytesMut;
 use futures::Stream;
 use js_sys::{Reflect, Uint8Array};
 use log::info;
+use tokio::io::AsyncRead;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use tokio::io::{simplex, AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf};
+use tokio::{io::{simplex, AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf}, sync::Mutex};
 
 use web_sys::{ReadableStream, ReadableStreamDefaultReader};
 
@@ -110,4 +115,158 @@ impl WebReaderPipe {
             this.write_half.write_all(&value.to_vec()).await.unwrap();
         }
     }
+}
+
+enum State {
+    Idle(Option<BytesMut>),
+    Busy(JsFuture, BytesMut),
+    Complete
+}
+
+
+struct Inner {
+    state: Option<State>,
+    buffer: Cursor<Vec<u8>>,
+    stream_done: bool,
+}
+
+impl Inner {
+
+}
+
+pub struct WebReaderAsyncRead {
+    stream_reader: ReadableStreamDefaultReader,
+    inner: Mutex<Inner>,
+}
+
+impl WebReaderAsyncRead {
+    pub fn new(stream_reader: ReadableStreamDefaultReader) -> Self {
+        let inner = Mutex::new(Inner {
+            state: Some(State::Idle(Some(BytesMut::new()))),
+            buffer: Cursor::default(),
+            stream_done: false,
+        });
+
+        Self { stream_reader, inner }
+    }
+}
+
+impl AsyncRead for WebReaderAsyncRead {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        dst: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+
+        let me = self.get_mut();
+        let inner = me.inner.get_mut();
+        match io::Read::read(&mut inner.buffer, &mut dst.initialize_unfilled()) {
+            Ok(z) => {
+                info!("Wrote {z} bytes from buffer and inner stream is done? {}", inner.stream_done);
+                if z > 0 {
+                    return std::task::Poll::Ready(Ok(()))
+                } else if inner.stream_done {
+                    return std::task::Poll::Ready(Ok(()))
+                }
+            },
+            Err(e) => {
+                tracing::error!("Buffer read error: {e}");
+                return std::task::Poll::Ready(Err(e))
+            }
+        }
+        if inner.stream_done {
+            info!("Stream is done after buffer check, we're done!");
+            return std::task::Poll::Ready(Ok(()))
+        }
+        loop {
+            let mut state = inner.state.take().unwrap();
+            match state {
+                State::Idle(ref mut buf_cell) => {
+                    log::info!("Idled, destination buffer: {}", dst.filled().len());
+                    let mut buf = buf_cell.take().unwrap();
+
+                    if !buf.is_empty() {
+                        log::info!("Buffer is not empty! {}", buf.len());
+                        inner.buffer = io::Cursor::new(buf.to_vec());
+                        buf.clear();
+                    }
+
+                    if !inner.stream_done {
+                        info!("scheduling next stream read");
+                        let f = JsFuture::from(me.stream_reader.read());
+                        inner.state = Some(State::Busy(f, buf));
+                    } else {
+                        info!("Inner state is complete");
+                        inner.state = Some(State::Complete);
+                    }
+
+                    match io::Read::read(&mut inner.buffer, &mut dst.initialize_unfilled()) {
+                        Ok(z) => {
+                            info!("Idle: Wrote {z} bytes from buffer and inner stream is done? {}", inner.stream_done);
+                            if z > 0 {
+                                return std::task::Poll::Ready(Ok(()))
+                            } else if inner.stream_done {
+                                return std::task::Poll::Ready(Ok(()))
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("Idle: Read buffer with error: {e}");
+                            return std::task::Poll::Ready(Err(e))
+                        }
+                    }
+
+                },
+                State::Busy(mut fut, mut buf) => {
+                    log::info!("Busy, polling future");
+                    let j = Pin::new(&mut fut).poll(cx);
+
+                    match j {
+                        Poll::Ready(jres) => {
+                            match jres {
+                                Ok(res) => {
+                                    let value = Reflect::get(&res, &JsValue::from_str("value")).unwrap();
+                                    let done = Reflect::get(&res, &JsValue::from_str("done")).unwrap().as_bool().unwrap();
+                                    if done || value.is_null() || value.is_undefined() {
+                                        log::info!("Exiting, done? {done}, value bad? {}", value.is_null() || value.is_undefined());
+                                        inner.state = Some(State::Idle(Some(buf)));
+                                        inner.stream_done = true;
+                                    } else {
+                                        let value_buf = Uint8Array::from(value).to_vec();
+                                        log::info!("Received chunk, {}", value_buf.len());
+                                        buf.extend_from_slice(&value_buf);
+                                        inner.state = Some(State::Idle(Some(buf)));
+                                        inner.stream_done = done;
+                                    }
+                                },
+                                Err(err) => {
+                                    log::error!("Error occurred while polling stream: {:?}", err.as_string());
+                                    inner.state = Some(State::Idle(Some(BytesMut::new())));
+                                    return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{err:?}"))))
+                                },
+                            }
+                        },
+                        Poll::Pending => {
+                            log::info!("Not ready yet");
+                            inner.state = Some(State::Busy(fut, buf));
+                            return Poll::Pending
+                        },
+                    }
+                },
+                State::Complete => {
+                    inner.state = Some(State::Complete);
+                    return std::task::Poll::Ready(Ok(()))
+                }
+            }
+            assert!(inner.state.is_some());
+        }
+    }
+}
+
+
+#[wasm_bindgen]
+pub async fn test_reader(stream_reader: ReadableStreamDefaultReader) -> String {
+    let mut handle = WebReaderAsyncRead::new(stream_reader);
+    let mut buf = String::new();
+    handle.read_to_string(&mut buf).await.unwrap();
+    buf
 }

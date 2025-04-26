@@ -12,7 +12,7 @@ export default defineConfig({
     topLevelAwait(),
     {
       ...viteSingleFile(),
-      apply: "build"
-    }
-  ],
-})
+      apply: "build",
+    },
+  ]
+});

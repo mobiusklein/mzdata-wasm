@@ -11,109 +11,127 @@ import {
     TableCell,
     Paper,
 } from "@mui/material";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { TableVirtuoso, TableComponents } from "react-virtuoso";
 import { useSpectrumViewerDispatch, useSpectrumViewer, ViewerActionType } from './util';
 
 
-interface RowContext {
-    clickHandler: Function
+export interface RowContext {
+  clickHandler: Function;
 }
 
-const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
-    Scroller: forwardRef<HTMLDivElement>((props, ref) => (
-        <TableContainer component={Paper} {...props} ref={ref} />
-    )),
-    Table: (props) => (
-        <Table
+export const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
+  Scroller: forwardRef<HTMLDivElement>((props, ref) => (
+    <TableContainer component={Paper} {...props} ref={ref} />
+  )),
+  Table: (props) => (
+    <Table
+      {...props}
+      size={"small"}
+      sx={{
+        borderCollapse: "separate",
+        tableLayout: "fixed",
+        minWidth: "100%",
+      }}
+    />
+  ),
+  TableHead: forwardRef<HTMLTableSectionElement>((props, ref) => (
+    <TableHead {...props} ref={ref} />
+  )),
+  TableRow: (props) => {
+    const clickHandler = props.context?.clickHandler;
+    const row = (
+      <TableRow
         {...props}
-        size={"small"}
-        sx={{
-            borderCollapse: "separate",
-            tableLayout: "fixed",
-            minWidth: "100%",
-        }}
-        />
-    ),
-    TableHead: forwardRef<HTMLTableSectionElement>((props, ref) => (
-        <TableHead {...props} ref={ref} />
-    )),
-    TableRow: (props) => {
-        const clickHandler = props.context?.clickHandler;
-        const row = (
-            <TableRow
-            {...props}
-            onClick={(_) => clickHandler ? clickHandler(props["data-index"]) : undefined}
-            />
-        );
-        return row;
-    },
-    TableBody: forwardRef<HTMLTableSectionElement>((props, ref) => (
-        <TableBody {...props} ref={ref} />
-    )),
+        onClick={(_) =>
+          clickHandler ? clickHandler(props["data-index"]) : undefined
+        }
+      />
+    );
+    return row;
+  },
+  TableBody: forwardRef<HTMLTableSectionElement>((props, ref) => (
+    <TableBody {...props} ref={ref} />
+  )),
 };
 
-interface Column {
-    name: string;
-    format?: Function | undefined;
-    numeric: boolean;
-    width?: number | undefined;
-    getter: Function;
+export interface Column {
+  name: string;
+  format?: Function | undefined;
+  numeric: boolean;
+  width?: number | undefined;
+  getter: Function;
+  class?: string | undefined;
 }
 
-const columnDefs: Column[] = [
-    {
-        name: "Index",
-        numeric: true,
-        getter: (spectrum: Spectrum) => spectrum.index,
-    },
-    {
-        name: "Native ID",
-        numeric: false,
-        getter: (spectrum: Spectrum) => spectrum.id,
-        width: 400,
-    },
-    {
-        name: "Time",
-        numeric: true,
-        format: (x: number) => x.toFixed(3),
-        getter: (spectrum: Spectrum) => spectrum.startTime,
-    },
-    {
-        name: "Base Peak m/z",
-        numeric: true,
-        format: (x: number) => x.toFixed(2),
-        getter: (spectrum: Spectrum) =>
-            spectrum.params().filter((par) => par.name == "base peak m/z")[0]?.value,
-    },
-    {
-        name: "Base Peak Int.",
-        numeric: true,
-        format: (x: number) => x.toExponential(2),
-        getter: (spectrum: Spectrum) =>
-            spectrum.params().filter((par) => par.name == "base peak intensity")[0]
+export const columnDefs: Column[] = [
+  {
+    name: "Index",
+    numeric: true,
+    getter: (spectrum: Spectrum) => spectrum.index,
+  },
+  {
+    name: "Native ID",
+    numeric: false,
+    getter: (spectrum: Spectrum) => spectrum.id,
+    width: 350,
+    class: "native-id-column",
+  },
+  {
+    name: "Time",
+    numeric: true,
+    format: (x: number) => x.toFixed(3),
+    getter: (spectrum: Spectrum) => spectrum.startTime,
+  },
+  {
+    name: "Base Peak m/z",
+    numeric: true,
+    format: (x: number) => x.toFixed(2),
+    getter: (spectrum: Spectrum) =>
+      spectrum.params().filter((par) => par.name == "base peak m/z")[0]?.value,
+  },
+  {
+    name: "Base Peak Int.",
+    numeric: true,
+    format: (x: number) => x.toExponential(2),
+    getter: (spectrum: Spectrum) =>
+      spectrum.params().filter((par) => par.name == "base peak intensity")[0]
         ?.value,
+  },
+  {
+    name: "MS Level",
+    numeric: true,
+    getter: (spectrum: Spectrum) => spectrum.msLevel,
+  },
+  {
+    name: "Prec. m/z",
+    numeric: true,
+    format: (x: number) => x.toFixed(3),
+    getter: (spectrum: Spectrum) =>
+      spectrum.precursor ? spectrum.precursor.ions[0].mz : null,
+  },
+  {
+    name: "Prec. z",
+    width: 40,
+    numeric: true,
+    getter: (spectrum: Spectrum) =>
+      spectrum.precursor ? spectrum.precursor.ions[0].charge : null,
+  },
+  {
+    name: "Ion Mob.",
+    numeric: true,
+    format: (x: number) => x.toFixed(2),
+    getter: (spectrum: Spectrum) => {
+      return spectrum.scanEvents.map((x) =>
+        x.params().find((p) => {
+          return p.name == "inverse reduced ion mobility";
+        })
+      )[0]?.value;
     },
-    {
-        name: "MS Level",
-        numeric: true,
-        getter: (spectrum: Spectrum) => spectrum.msLevel,
-    },
-    {
-        name: "Prec. m/z",
-        numeric: true,
-        format: (x: number) => x.toFixed(3),
-        getter: (spectrum: Spectrum) =>
-            spectrum.precursor ? spectrum.precursor.ions[0].mz : null,
-    },
-    {
-        name: "Prec. z",
-        numeric: true,
-        getter: (spectrum: Spectrum) =>
-            spectrum.precursor ? spectrum.precursor.ions[0].charge : null,
-    },
+  },
 ];
 
-function fixedHeaderContent() {
+export function fixedHeaderContent() {
     return (
         <TableRow>
         {columnDefs.map((column) => {
@@ -137,23 +155,34 @@ function fixedHeaderContent() {
     );
 }
 
-function rowContent(_index: number, row: Spectrum, currentSpectrumID: string | undefined) {
-    const isCurrentSpectrum = row.id == currentSpectrumID
-    return (
-        <Fragment>
-        {columnDefs.map((column) => {
-            let value = column.getter(row);
-            if (column.format && value !== undefined && value !== null) {
-                value = column.format(value);
-            }
-            return (
-                <TableCell key={column.name} align={"center"} className={isCurrentSpectrum ? "current-spectrum" : ""}>
-                {value}
-                </TableCell>
-            );
-        })}
-        </Fragment>
-    );
+export function rowContent(
+  _index: number,
+  row: Spectrum,
+  currentSpectrumID: string | undefined
+) {
+  const isCurrentSpectrum = row.id == currentSpectrumID;
+  return (
+    <Fragment>
+      {columnDefs.map((column) => {
+        let value = column.getter(row);
+        if (column.format && value !== undefined && value !== null) {
+          value = column.format(value);
+        }
+        return (
+          <TableCell
+            key={column.name}
+            align={"center"}
+            className={[
+              isCurrentSpectrum ? "current-spectrum" : "",
+              column.class ? column.class : "",
+            ].join(" ")}
+          >
+            {value}
+          </TableCell>
+        );
+      })}
+    </Fragment>
+  );
 }
 
 export function VirtualizedTable() {
@@ -167,8 +196,11 @@ export function VirtualizedTable() {
             value: index
         })
     };
+
+    const isMobile = useMediaQuery("(max-width:500px)");
+
     return (
-        <Paper style={{ height: 400, minWidth: 1000, overflow: "hidden" }}>
+        <Paper style={{ height: 400, minWidth: 1000, overflowY: "hidden", overflowX: "hidden", marginLeft: isMobile ? "10em" : 0 }}>
         <TableVirtuoso
         totalCount={mzReader ? mzReader.length : 0}
         itemContent={(index: number) => {

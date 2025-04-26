@@ -1,4 +1,10 @@
-import { IsotopicModel, MZReader, Spectrum, SpectrumGroup } from "mzdata";
+import {
+  IonMobilityFrame,
+  IsotopicModel,
+  MZReader,
+  Spectrum,
+  SpectrumGroup,
+} from "mzdata";
 import {
   LayerBase,
   PointLayer,
@@ -6,12 +12,22 @@ import {
   PrecursorPeakLayer,
   DeconvolutedLayer,
   IsolationWindowLayer,
+  FeatureMapLayerBase,
+  FeatureMapPointLayer,
+  FeatureMapEllipseLayer,
+  DeconvolvedFeatureMapEllipseLayer,
+  PointLike,
+  FeatureCanvasPoint,
+  DeconvolutedPoint,
+  ChargedPoint,
+  MZPoint,
 } from "./canvas/layers";
 import { createContext, Dispatch, useContext, useReducer } from "react";
+import * as mzdata from "mzdata";
 
 export class SpectrumData {
-  spectrum: Spectrum;
-  layers: LayerBase[];
+  spectrum: Spectrum | IonMobilityFrame;
+  layers: (LayerBase<PointLike> | FeatureMapLayerBase)[];
   group: SpectrumGroup | undefined;
 
   get id() {
@@ -29,15 +45,54 @@ export class SpectrumData {
     }
   }
 
-  constructor(spectrum: Spectrum, group?: SpectrumGroup) {
+  constructor(spectrum: Spectrum | IonMobilityFrame, group?: SpectrumGroup) {
     this.spectrum = spectrum;
     this.group = group;
     this.layers = [];
     this.buildLayers();
   }
 
-  buildLayers() {
-    const spectrum = this.spectrum;
+  buildLayersIonMobility() {
+    if (!(this.spectrum instanceof IonMobilityFrame)) {
+      return
+    }
+    const spectrum = this.spectrum as IonMobilityFrame
+    const featurePoints = spectrum.features()?.flatMap((feat) => {
+      const points: FeatureCanvasPoint[] = [];
+      for (let i = 0; i < feat.length; i++) {
+        const p = feat.at(i);
+        if (p) {
+          points.push(new FeatureCanvasPoint(p.mz, p.intensity, p.time));
+        }
+      }
+      return points;
+    });
+    if (featurePoints) {
+      const layer = new FeatureMapPointLayer(featurePoints, {}, null);
+      this.layers.push(layer);
+      const ellipseLayer = new FeatureMapEllipseLayer(
+        spectrum.features() as mzdata.Feature[],
+        {},
+        null
+      );
+      this.layers.push(ellipseLayer);
+    }
+
+    if (spectrum.deconvolutedFeatures()) {
+      const layer = new DeconvolvedFeatureMapEllipseLayer(
+        spectrum.deconvolutedFeatures() as mzdata.DeconvolvedFeature[],
+        {},
+        null
+      );
+      this.layers.push(layer);
+    }
+  }
+
+  buildLayersSpectrum() {
+    if (!(this.spectrum instanceof Spectrum)) {
+      return;
+    }
+    const spectrum = this.spectrum as Spectrum
     if (spectrum.isProfile) {
       const arrayTable: any = spectrum.rawArrays();
       const mzs = arrayTable["m/z array"] as Float64Array;
@@ -45,28 +100,41 @@ export class SpectrumData {
       this.layers.push(new ProfileLayer(mzs, intensities, {}));
       const centroids = spectrum.centroidPeaks();
       if (centroids && centroids.length > 0) {
-        this.layers.push(new PointLayer(centroids, {}));
+        this.layers.push(
+          new PointLayer(
+            centroids.map((p) => new MZPoint(p.mz, p.intensity)),
+            {}
+          )
+        );
       }
     } else {
       const points = spectrum.centroidPeaks() || [];
       if (points && points.length > 0) {
-        this.layers.push(new PointLayer(points, {}));
+        this.layers.push(
+          new PointLayer(
+            points.map((p) => new MZPoint(p.mz, p.intensity)),
+            {}
+          )
+        );
       }
     }
     const deconvolutedCentroids = spectrum.deconvolutedPeaks();
     if (deconvolutedCentroids && deconvolutedCentroids.length > 0) {
       this.layers.push(
-        new DeconvolutedLayer(deconvolutedCentroids, { strokeWidth: 0.5 })
+        new DeconvolutedLayer(
+          deconvolutedCentroids.map(DeconvolutedPoint.fromSource),
+          { strokeWidth: 0.5 }
+        )
       );
     }
     if (spectrum.msLevel > 1) {
       if (spectrum.precursor) {
         const precIon = spectrum.precursor.ions[0];
-        const precursorPoint = {
-          mz: precIon.mz,
-          intensity: precIon.intensity,
-          charge: precIon.charge || 0,
-        };
+        const precursorPoint = new ChargedPoint(
+          precIon.mz,
+          precIon.intensity,
+          precIon.charge || 0
+        );
         this.layers.push(new PrecursorPeakLayer(precursorPoint, {}));
       }
     }
@@ -75,9 +143,22 @@ export class SpectrumData {
         .map((x) => x.precursor?.isolationWindow)
         .filter((x) => x !== undefined);
       if (windows.length > 0) {
-        const height = this.layers[0].maxIntensity();
+        const height = this.layers[0].maxY();
         this.layers.push(new IsolationWindowLayer(windows, height, {}));
       }
+    }
+  }
+
+  buildLayers() {
+    let spectrum = this.spectrum;
+    if (spectrum instanceof Spectrum && spectrum.hasIonMobilityDimension()) {
+      spectrum = spectrum.asIonMobilityFrame();
+      this.spectrum = spectrum;
+    }
+    if (spectrum instanceof Spectrum) {
+      this.buildLayersSpectrum()
+    } else if (spectrum instanceof IonMobilityFrame) {
+      this.buildLayersIonMobility()
     }
   }
 }
@@ -89,12 +170,19 @@ export class ProcessingParams {
   isotopicModels: IsotopicModel[];
   doDeconvolution: boolean;
 
+  minimumFeatureExtractionSize: number;
+  maximumFeatureGapSize: number;
+  massErrorTolerance: mzdata.Tolerance;
+
   constructor(
     deconvolutionScore: number,
     denoiseScale: number,
     reprofile: boolean,
     isotopicModels: IsotopicModel[],
-    doDeconvolution?: boolean
+    doDeconvolution?: boolean,
+    minimumFeatureExtractionSize?: number,
+    maximumFeatureGapSize?: number,
+    massErrorTolerance?: mzdata.Tolerance
   ) {
     this.deconvolutionScore = deconvolutionScore;
     this.denoiseScale = denoiseScale;
@@ -102,6 +190,15 @@ export class ProcessingParams {
     this.isotopicModels = isotopicModels;
     this.doDeconvolution =
       doDeconvolution === undefined ? true : doDeconvolution;
+    this.minimumFeatureExtractionSize =
+      minimumFeatureExtractionSize === undefined
+        ? 3
+        : minimumFeatureExtractionSize;
+    this.maximumFeatureGapSize =
+      maximumFeatureGapSize === undefined ? 0.025 : maximumFeatureGapSize;
+    this.massErrorTolerance = massErrorTolerance
+      ? massErrorTolerance
+      : mzdata.Tolerance.ppm(15.0);
   }
 
   copy(): ProcessingParams {
@@ -110,7 +207,10 @@ export class ProcessingParams {
       this.denoiseScale,
       this.reprofile,
       this.isotopicModels,
-      this.doDeconvolution
+      this.doDeconvolution,
+      this.minimumFeatureExtractionSize,
+      this.maximumFeatureGapSize,
+      this.massErrorTolerance,
     );
   }
 
@@ -118,8 +218,49 @@ export class ProcessingParams {
     return new ProcessingParams(10, 1, false, [IsotopicModel.peptide()], true);
   }
 
-  apply(spectrum: Spectrum) {
-    console.log("Applying", this);
+  applyIonMobilityFrame(frame: IonMobilityFrame) {
+    if (!frame.features()) {
+      console.log("Extracting features");
+      if (frame.msLevel == 1) {
+        frame.extractFeatures(
+          this.minimumFeatureExtractionSize,
+          this.maximumFeatureGapSize,
+          this.massErrorTolerance.copy(),
+        );
+      } else {
+        frame.extractFeatures(
+          this.minimumFeatureExtractionSize,
+          this.maximumFeatureGapSize,
+          this.massErrorTolerance.copy(),
+        );
+      }
+      console.log("Done extracting features");
+    }
+    if (!frame.deconvolutedFeatures() && this.doDeconvolution) {
+      if (!this.isotopicModels) throw new Error(this.isotopicModels);
+      console.log("Deconvolving features");
+      if (frame.msLevel == 1) {
+        frame.deconvolveFeatures(
+          this.minimumFeatureExtractionSize,
+          this.maximumFeatureGapSize,
+          this.deconvolutionScore,
+          this.isotopicModels.map((i) => i.copy()),
+          this.massErrorTolerance.copy(),
+        );
+      } else {
+        frame.deconvolveFeatures(
+          this.minimumFeatureExtractionSize,
+          this.maximumFeatureGapSize,
+          this.deconvolutionScore,
+          this.isotopicModels.map((i) => i.copy())
+        );
+      }
+      console.log("Done deconvolving features");
+    }
+    return frame;
+  }
+
+  applySpectrum(spectrum: Spectrum) {
     if (this.reprofile) {
       spectrum.reprofile(0.001, 0.01);
     }
@@ -135,8 +276,19 @@ export class ProcessingParams {
         this.isotopicModels.map((i) => i.copy())
       );
     }
-
     return spectrum;
+  }
+
+  apply(spectrum: Spectrum | IonMobilityFrame) {
+    console.log("Applying", this);
+    if (spectrum instanceof IonMobilityFrame) {
+      return this.applyIonMobilityFrame(spectrum);
+    } else if (spectrum.hasIonMobilityDimension()) {
+      const frame = spectrum.asIonMobilityFrame();
+      return this.applyIonMobilityFrame(frame);
+    } else {
+      return this.applySpectrum(spectrum);
+    }
   }
 }
 
@@ -167,7 +319,7 @@ export class SpectrumViewerState {
     );
   }
 
-  loadCurrentGroup(spectrum: Spectrum) {
+  loadCurrentGroup(spectrum: Spectrum | IonMobilityFrame) {
     if (
       (spectrum.msLevel || 0) == 1 &&
       this.mzReader &&
@@ -185,12 +337,14 @@ export class SpectrumViewerState {
       return;
     }
     this.mzReader.setDataLoading(true);
-    const spectrum = this.mzReader.at(this.currentSpectrumIdx);
+    let spectrum: Spectrum | IonMobilityFrame | undefined = this.mzReader.at(
+      this.currentSpectrumIdx
+    );
     this.mzReader.setDataLoading(false);
     if (spectrum === undefined) {
       return;
     }
-    this.processingParams.apply(spectrum);
+    spectrum = this.processingParams.apply(spectrum);
     const group = this.loadCurrentGroup(spectrum);
     this.spectrumData = new SpectrumData(spectrum, group);
     return this.spectrumData;
@@ -279,4 +433,16 @@ export function useSpectrumViewerDispatch(): Dispatch<SpectrumViewerAction> {
     throw new Error("Using SpectrumViewerState out of context!");
   }
   return ctx;
+}
+
+export //https://stackoverflow.com/a/2117523/1137920
+function uuidv4(): string {
+  return (([1e7] as any) + -1e3 + -4e3 + -8e3 + -1e11).replace(
+    /[018]/g,
+    (c: number) =>
+      (
+        c ^
+        (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
+      ).toString(16)
+  );
 }

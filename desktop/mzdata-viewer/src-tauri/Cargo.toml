@@ -1,0 +1,66 @@
+[package]
+name = "mzdata-viewer"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "mzdata_viewer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = ["bruker_tdf"]
+
+thermo = ["mzdata/thermo"]
+bruker_tdf = ["mzdata/bruker_tdf"]
+
+[dependencies]
+
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-opener = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+
+tracing = { version = "0.1.40" }
+tracing-log = { version = "0.2.0" }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "chrono"] }
+tracing-appender = "0.2.3"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1.3.0"
+
+itertools = "0.14.0"
+
+mzdata = { version = "0.51.0", features = [
+    "mzsignal",
+    'nalgebra',
+    "serde",
+] }
+
+mzpeaks = { workspace = true }
+chemical_elements = { workspace = true }
+mzdeisotope = { workspace = true }
+mzdeisotope-map = { workspace = true }
+mzsignal = { workspace = true }
+
+log = "0.4.20"
+
+
+egui-file-dialog = "0.9.0"
+egui = { version = "0.31.0", default-features = false }
+eframe = { version = "0.31.0", default-features = false, features = [
+    "glow",
+    "persistence",
+    "wayland",
+    "x11",
+] }

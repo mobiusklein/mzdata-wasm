@@ -15,7 +15,7 @@ wasm-bindgen = "0.2.99"
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
-console_error_panic_hook = { version = "0.1.7", optional = true }
+console_error_panic_hook = { version = "0.1.7" }
 
 js-sys = "0.3.76"
 web-sys = { version = "0.3.76", features = [
@@ -31,20 +31,38 @@ web-sys = { version = "0.3.76", features = [
     "ReadableStream",
 ] }
 
-mzdata = { version = "0.41.0", default-features = false, features = [
+mzdata = { version = "0.51.0", default-features = false, features = [
+    "mzml",
+    "mgf",
     "mzsignal",
     'nalgebra',
     "serde"
 ] }
 
-mzpeaks = "1.0"
-chemical_elements = "0.5.0"
-mzdeisotope = { version = "0.2.5", features = ["serde"]}
+flate2 = "1.0.35"
+
+mzpeaks = { workspace = true }
+chemical_elements = { workspace = true }
+mzdeisotope = { workspace = true }
+mzdeisotope-map = { workspace = true }
+mzsignal = { workspace = true }
+
 wasm-logger = "0.2.0"
+tracing-wasm = "0.2.1"
+
 log = "0.4.20"
-mzsignal = { version = "1.0", default-features = false, features = ["nalgebra", "serde"]}
 serde = { version = "1.0.217", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+futures = "0.3.31"
+tokio = { version = "1.43.0", features = ["sync", "rt", "io-util"] }
+bytes = "1.9.0"
+
+wasm-bindgen-futures = "0.4.50"
+pin-project = "1.1.8"
+tokio-util = { version = "0.7.13", features = ["io-util"] }
+tracing = "0.1.41"
+serde_json = "1.0.139"
+rmp-serde = "1.3.0"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
@@ -54,3 +72,44 @@ wasm-bindgen-test = "0.3.34"
 # opt-level = "s"
 opt-level = 3
 debug = true
+
+[patch.crates-io]
+
+[workspace]
+
+resolver = "2"
+members = [".", "./desktop/mzdata-viewer/src-tauri/"]
+
+[workspace.dependencies]
+mzpeaks = "1"
+chemical_elements = "0.6.0"
+mzdeisotope = { version = "0.3.1", features = ["serde"]}
+mzdeisotope-map = { version = "0.3.1", features = ["serde"]}
+mzsignal = { version = ">=1.1.2", default-features = false, features = ["nalgebra", "serde"]}
+
+
+
+[profile.release.package."mzsignal"]
+opt-level = 3
+
+[profile.release.package."chemical_elements"]
+opt-level = 3
+
+[profile.release.package."mzdeisotope"]
+opt-level = 3
+
+[profile.release.package."mzdeisotope-map"]
+opt-level = 3
+
+[profile.dev.package."mzsignal"]
+opt-level = 3
+
+[profile.dev.package."chemical_elements"]
+opt-level = 3
+
+[profile.dev.package."mzdeisotope"]
+opt-level = 3
+
+[profile.dev.package."mzdeisotope-map"]
+opt-level = 3
+
